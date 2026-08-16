@@ -100,7 +100,7 @@ describe("stdout cleanliness in non-interactive modes", () => {
 
 		expect(result.code).toBe(0);
 		expect(result.stdout).toContain("Built-in Tool Names:");
-		expect(result.stdout).toContain("prune_context - Prune message groups from context to reduce size");
+		expect(result.stdout).toContain("prune_context - Exclude context blocks that no longer matter for future work");
 	});
 
 	it("keeps stdout empty for --mode json --help while routing trusted startup chatter to stderr", async () => {

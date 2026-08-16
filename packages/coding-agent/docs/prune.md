@@ -88,9 +88,10 @@ Two modes, selected by arguments:
   preview. The id is the block's first entry id; that id is what prune mode
   accepts.
 - **Prune** — `{"ids": ["id1", "id2"]}` marks each matched block `"excluded"`
-  via `setPruneState`. Each block is pruned atomically (tool calls stay with
-  their results). Unknown ids are reported but ignored; pruning is reversible
-  and does not delete history.
+  via `setPruneState`. Each block is excluded atomically (tool calls stay with
+  their results). Unknown ids are reported but ignored. The agent tool only
+  excludes and cannot restore; session history is retained, and the user can
+  restore blocks via `/prune`.
 
 After pruning, the tool clears the cached context-status percent baseline and
 forces a context-status message on the next turn so the user can verify the

@@ -10,11 +10,12 @@ window fills with stale or irrelevant content. Upstream Pi manages this
 reactively: the harness compacts context when it crosses a threshold or
 overflows, and the user can trigger compaction manually.
 
-`rxpi` adds a second, agentic lever. It treats context as a limited resource
-that the model is made aware of (via `[context-status]` messages) and can curate
-itself (via the `prune_context` tool). The goal is relevance and quality — a
-smaller, cleaner context ahead of each task — rather than relying only on user-
-or harness-driven compaction after the fact.
+`rxpi` adds a second, agentic lever. It treats context as a curated working
+set that the model is made aware of (via `[context-status]` messages) and can
+curate itself (via the `prune_context` tool). The goal is relevance and quality —
+retain what still has value for the work at hand, exclude what is completed,
+stale, or superseded — rather than relying only on user- or harness-driven
+compaction after the fact.
 
 ## `[context-status]` messages
 
@@ -46,8 +47,15 @@ turn instead.
 A status message is an ordinary message: it is appended to the transcript,
 persisted to the session file, rendered as a highlighted line in the TUI (accent
 below 70% usage, warning at 70% and above), and sent to the model on the next
-request. The model's system prompt tells it that only the most recent such note
-is valid and to treat climbing usage — especially toward 80% — as a cue to prune.
+request. The model's system prompt frames context as its working set: it keeps
+information likely to matter for work ahead and, after completing a task or
+changing direction, excludes reads, explorations, tool results, and attempts
+that no longer inform the next steps. It does this before capacity is scarce,
+because context quality depends on relevance rather than remaining token space.
+When following a plan, it retains material needed for the remaining steps; in
+open-ended interactive work, it uses judgment about likely follow-up. The
+`[context-status]` figures measure capacity; they do not determine when to
+prune. Curation is based on the value of the content.
 
 ## `prune_context` — the agent curates its own context
 
