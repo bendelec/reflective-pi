@@ -208,6 +208,7 @@ describe("AgentSessionRuntime characterization", () => {
 			"user",
 			"assistant",
 			"toolResult",
+			"contextStatus",
 			"assistant",
 		]);
 	});
@@ -378,19 +379,23 @@ describe("AgentSessionRuntime characterization", () => {
 		const result = await runtime.fork(leafId!, { position: "at" });
 		expect(result).toEqual({ cancelled: false, selectedText: undefined });
 		expect(runtime.session.sessionFile).not.toBe(previousSessionFile);
+		// Forking a session with existing content injects a context-status baseline;
+		// compare only the duplicated branch messages.
 		expect(
-			runtime.session.messages.map((message) => ({
-				role: message.role,
-				text:
-					message.role === "user"
-						? typeof message.content === "string"
-							? message.content
-							: message.content
-									.filter((part): part is { type: "text"; text: string } => part.type === "text")
-									.map((part) => part.text)
-									.join("")
-						: undefined,
-			})),
+			runtime.session.messages
+				.filter((message) => message.role !== "contextStatus")
+				.map((message) => ({
+					role: message.role,
+					text:
+						message.role === "user"
+							? typeof message.content === "string"
+								? message.content
+								: message.content
+										.filter((part): part is { type: "text"; text: string } => part.type === "text")
+										.map((part) => part.text)
+										.join("")
+							: undefined,
+				})),
 		).toEqual(beforeMessages);
 	});
 
@@ -490,19 +495,23 @@ describe("AgentSessionRuntime characterization", () => {
 		const result = await runtime.fork(leafId!, { position: "at" });
 		expect(result).toEqual({ cancelled: false, selectedText: undefined });
 		expect(runtime.session.sessionFile).toBeUndefined();
+		// Forking a session with existing content injects a context-status baseline;
+		// compare only the duplicated branch messages.
 		expect(
-			runtime.session.messages.map((message) => ({
-				role: message.role,
-				text:
-					message.role === "user"
-						? typeof message.content === "string"
-							? message.content
-							: message.content
-									.filter((part): part is { type: "text"; text: string } => part.type === "text")
-									.map((part) => part.text)
-									.join("")
-						: undefined,
-			})),
+			runtime.session.messages
+				.filter((message) => message.role !== "contextStatus")
+				.map((message) => ({
+					role: message.role,
+					text:
+						message.role === "user"
+							? typeof message.content === "string"
+								? message.content
+								: message.content
+										.filter((part): part is { type: "text"; text: string } => part.type === "text")
+										.map((part) => part.text)
+										.join("")
+							: undefined,
+				})),
 		).toEqual(beforeMessages);
 	});
 

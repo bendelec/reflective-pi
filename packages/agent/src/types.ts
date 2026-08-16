@@ -132,6 +132,8 @@ export interface ShouldStopAfterTurnContext {
 	context: AgentContext;
 	/** Messages that this loop invocation will return if it exits at this point. Prompt runs include the initial prompt messages; continuation runs do not include pre-existing context messages. */
 	newMessages: AgentMessage[];
+	/** True when every finalized tool result in the just-finished batch requested early termination. Consumers that inject automatic follow-up messages (e.g. context-status notes) must not do so when this is set, or they would force an extra turn and defeat termination. */
+	terminated?: boolean;
 }
 
 /** Replacement runtime state used by the agent loop before starting another provider request. */

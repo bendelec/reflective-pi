@@ -27,6 +27,15 @@ function getText(message: AgentSession["messages"][number]): string {
 				.join("");
 }
 
+// Normalize the injected context-status message to a stable label so tests can still assert
+// the exact message order without depending on the dynamic token-usage text.
+function getRoleText(message: AgentSession["messages"][number]): string {
+	if (message.role === "contextStatus") {
+		return "contextStatus:[context-status]";
+	}
+	return `${message.role}:${getText(message)}`;
+}
+
 describe("regression #2860: replaced session callbacks", () => {
 	const cleanups: Array<() => Promise<void> | void> = [];
 
@@ -232,9 +241,10 @@ describe("regression #2860: replaced session callbacks", () => {
 		await runtime.session.prompt("seed");
 		await runtime.session.prompt("/fork-it");
 
-		expect(runtime.session.messages.map((message) => `${message.role}:${getText(message)}`)).toEqual([
+		expect(runtime.session.messages.map(getRoleText)).toEqual([
 			"user:seed",
 			"assistant:seed reply",
+			"contextStatus:[context-status]",
 			"user:fork callback message",
 			"assistant:fork reply",
 		]);
@@ -269,9 +279,10 @@ describe("regression #2860: replaced session callbacks", () => {
 		await runtime.session.prompt("/switch-it");
 
 		expect(runtime.session.sessionFile).toBe(targetSessionPath);
-		expect(runtime.session.messages.map((message) => `${message.role}:${getText(message)}`)).toEqual([
+		expect(runtime.session.messages.map(getRoleText)).toEqual([
 			"user:target",
 			"assistant:target reply",
+			"contextStatus:[context-status]",
 			"user:switch callback message",
 			"assistant:switch reply",
 		]);

@@ -204,6 +204,7 @@ async function runLoop(
 
 			const toolResults: ToolResultMessage[] = [];
 			hasMoreToolCalls = false;
+			let terminated = false;
 			if (toolCalls.length > 0) {
 				// A "length" stop means the output was cut off by the token limit, so
 				// every tool call in the message may carry truncated arguments. Fail
@@ -214,6 +215,7 @@ async function runLoop(
 						: await executeToolCalls(currentContext, message, config, signal, emit);
 				toolResults.push(...executedToolBatch.messages);
 				hasMoreToolCalls = !executedToolBatch.terminate;
+				terminated = executedToolBatch.terminate;
 
 				for (const result of toolResults) {
 					currentContext.messages.push(result);
@@ -228,6 +230,7 @@ async function runLoop(
 				toolResults,
 				context: currentContext,
 				newMessages,
+				terminated,
 			};
 			const nextTurnSnapshot = await config.prepareNextTurn?.(nextTurnContext);
 			if (nextTurnSnapshot) {
@@ -250,6 +253,7 @@ async function runLoop(
 					toolResults,
 					context: currentContext,
 					newMessages,
+					terminated,
 				})
 			) {
 				await emit({ type: "agent_end", messages: newMessages });
@@ -262,6 +266,7 @@ async function runLoop(
 				toolResults,
 				context: currentContext,
 				newMessages,
+				terminated,
 			};
 			const steering = (await config.getSteeringMessages?.()) || [];
 			const contextStatus = (await config.getContextStatusMessages?.(updatedTurnContext)) || [];

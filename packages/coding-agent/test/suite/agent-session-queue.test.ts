@@ -226,7 +226,12 @@ describe("AgentSession queue characterization", () => {
 		releaseToolExecution();
 		await promptPromise;
 
-		expect(batchedUserMessages).toEqual(["start", "steer 1", "steer 2"]);
+		expect(batchedUserMessages.filter((message) => !message.startsWith("[context-status]"))).toEqual([
+			"start",
+			"steer 1",
+			"steer 2",
+		]);
+		expect(batchedUserMessages.some((message) => message.startsWith("[context-status]"))).toBe(true);
 		expect(getAssistantTexts(harness)).toEqual(["", "batched steer response"]);
 	});
 
@@ -254,7 +259,12 @@ describe("AgentSession queue characterization", () => {
 		releaseToolExecution();
 		await promptPromise;
 
-		expect(batchedUserMessages).toEqual(["start", "follow-up 1", "follow-up 2"]);
+		expect(batchedUserMessages.filter((message) => !message.startsWith("[context-status]"))).toEqual([
+			"start",
+			"follow-up 1",
+			"follow-up 2",
+		]);
+		expect(batchedUserMessages.some((message) => message.startsWith("[context-status]"))).toBe(true);
 		expect(getAssistantTexts(harness)).toEqual(["", "original turn complete", "batched follow-up response"]);
 	});
 

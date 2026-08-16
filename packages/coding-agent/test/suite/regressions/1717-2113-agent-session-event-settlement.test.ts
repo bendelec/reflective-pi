@@ -57,6 +57,7 @@ describe("regressions #1717/#2113: agent session event settlement", () => {
 			"assistant",
 			"toolResult",
 			"toolResult",
+			"contextStatus",
 			"assistant",
 		]);
 		const firstToolResultIndex = branchMessages.findIndex((message) => message.role === "toolResult");

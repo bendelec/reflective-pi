@@ -71,10 +71,12 @@ describe("AgentSession prompt characterization", () => {
 			"user",
 			"assistant",
 			"toolResult",
+			"contextStatus",
 			"assistant",
 		]);
 		expect(harness.session.messages[2]?.role).toBe("toolResult");
-		expect(harness.session.messages[3]?.role).toBe("assistant");
+		expect(harness.session.messages[3]?.role).toBe("contextStatus");
+		expect(harness.session.messages[4]?.role).toBe("assistant");
 	});
 
 	it("executes multiple tool calls from one response and continues with a single follow-up response", async () => {

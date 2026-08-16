@@ -229,12 +229,14 @@ describe("AgentSession bash and persistence characterization", () => {
 			"message",
 			"message",
 			"message",
+			"message",
 		]);
 		expect(harness.session.messages.map((message) => message.role)).toEqual([
 			"custom",
 			"user",
 			"assistant",
 			"toolResult",
+			"contextStatus",
 			"assistant",
 		]);
 	});

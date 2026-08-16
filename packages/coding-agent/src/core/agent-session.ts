@@ -598,8 +598,10 @@ export class AgentSession {
 		this.agent.getContextStatusMessages = async (context) => {
 			// Only inject when the turn just executed tool work. A terminal turn (no tool
 			// results) would otherwise be forced into an extra assistant response, which
-			// cascades into an infinite loop once context is >= 80%.
-			if (context.toolResults.length === 0) {
+			// cascades into an infinite loop once context is >= 80%. The same applies when
+			// the tool batch requested early termination: injecting a status note would
+			// defeat the termination by forcing another turn.
+			if (context.toolResults.length === 0 || context.terminated) {
 				return [];
 			}
 			// Skip context-status message if pruning happened this turn.

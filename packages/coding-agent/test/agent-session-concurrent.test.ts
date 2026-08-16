@@ -623,6 +623,7 @@ describe("AgentSession concurrent prompt guard", () => {
 			"user",
 			"assistant",
 			"toolResult",
+			"contextStatus",
 			"assistant",
 		]);
 	});

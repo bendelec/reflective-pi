@@ -1,6 +1,6 @@
 import { ProcessTerminal, setKeybindings, type TUI, TuiMainScreen } from "@earendil-works/pi-tui";
 import { existsSync } from "fs";
-import { BINARY_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, getAgentDir, getSettingsPath, PACKAGE_NAME } from "../config.ts";
+import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, getAgentDir, getSettingsPath, PACKAGE_NAME } from "../config.ts";
 import { areExperimentalFeaturesEnabled } from "../core/experimental.ts";
 import { KeybindingsManager } from "../core/keybindings.ts";
 import { DefaultPackageManager, type ResolvedResource } from "../core/package-manager.ts";
@@ -116,7 +116,7 @@ export function shouldRunFirstTimeSetup(settingsPath: string = getSettingsPath()
 	if (
 		!isOfficialDistribution({
 			packageName: PACKAGE_NAME,
-			appName: BINARY_NAME,
+			appName: APP_NAME,
 			configDirName: CONFIG_DIR_NAME,
 		})
 	) {
