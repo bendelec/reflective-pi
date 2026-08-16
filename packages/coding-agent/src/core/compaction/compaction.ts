@@ -13,6 +13,7 @@ import { convertToLlm } from "../messages.ts";
 import {
 	buildSessionContext,
 	type CompactionEntry,
+	type PruneState,
 	type SessionEntry,
 	sessionEntryToContextMessages,
 } from "../session-manager.ts";
@@ -77,8 +78,11 @@ function extractFileOperations(
  * Extract AgentMessage from an entry if it produces one.
  * Returns undefined for entries that don't contribute to LLM context.
  */
-function getMessageFromEntryForCompaction(entry: SessionEntry): AgentMessage | undefined {
-	if (entry.type === "compaction") {
+function getMessageFromEntryForCompaction(
+	entry: SessionEntry,
+	pruneStateById?: ReadonlyMap<string, PruneState>,
+): AgentMessage | undefined {
+	if (entry.type === "compaction" || pruneStateById?.get(entry.id) === "excluded") {
 		return undefined;
 	}
 	return sessionEntryToContextMessages(entry)[0];
@@ -291,6 +295,10 @@ export function estimateTokens(message: AgentMessage): number {
 			chars = estimateTextAndImageContentChars(message.content);
 			return Math.ceil(chars / 4);
 		}
+		case "contextStatus": {
+			chars = message.content.length;
+			return Math.ceil(chars / 4);
+		}
 		case "bashExecution": {
 			chars = message.command.length + message.output.length;
 			return Math.ceil(chars / 4);
@@ -335,11 +343,9 @@ function isTurnStartMessage(message: AgentMessage): boolean {
 	return false;
 }
 
-function isTurnStartEntry(entry: SessionEntry): boolean {
-	if (entry.type === "compaction") {
-		return false;
-	}
-	return sessionEntryToContextMessages(entry).some(isTurnStartMessage);
+function isTurnStartEntry(entry: SessionEntry, pruneStateById?: ReadonlyMap<string, PruneState>): boolean {
+	const message = getMessageFromEntryForCompaction(entry, pruneStateById);
+	return message ? isTurnStartMessage(message) : false;
 }
 
 /**
@@ -348,14 +354,16 @@ function isTurnStartEntry(entry: SessionEntry): boolean {
  * When we cut at an assistant message with tool calls, its tool results follow it
  * and will be kept.
  */
-function findValidCutPoints(entries: SessionEntry[], startIndex: number, endIndex: number): number[] {
+function findValidCutPoints(
+	entries: SessionEntry[],
+	startIndex: number,
+	endIndex: number,
+	pruneStateById?: ReadonlyMap<string, PruneState>,
+): number[] {
 	const cutPoints: number[] = [];
 	for (let i = startIndex; i < endIndex; i++) {
-		const entry = entries[i];
-		if (entry.type === "compaction") {
-			continue;
-		}
-		if (sessionEntryToContextMessages(entry).some(isCutPointMessage)) {
+		const message = getMessageFromEntryForCompaction(entries[i], pruneStateById);
+		if (message && isCutPointMessage(message)) {
 			cutPoints.push(i);
 		}
 	}
@@ -366,9 +374,14 @@ function findValidCutPoints(entries: SessionEntry[], startIndex: number, endInde
  * Find the context-visible user-role message that starts the turn containing the given entry index.
  * Returns -1 if no turn start found before the index.
  */
-export function findTurnStartIndex(entries: SessionEntry[], entryIndex: number, startIndex: number): number {
+export function findTurnStartIndex(
+	entries: SessionEntry[],
+	entryIndex: number,
+	startIndex: number,
+	pruneStateById?: ReadonlyMap<string, PruneState>,
+): number {
 	for (let i = entryIndex; i >= startIndex; i--) {
-		if (isTurnStartEntry(entries[i])) {
+		if (isTurnStartEntry(entries[i], pruneStateById)) {
 			return i;
 		}
 	}
@@ -405,8 +418,9 @@ export function findCutPoint(
 	startIndex: number,
 	endIndex: number,
 	keepRecentTokens: number,
+	pruneStateById?: ReadonlyMap<string, PruneState>,
 ): CutPointResult {
-	const cutPoints = findValidCutPoints(entries, startIndex, endIndex);
+	const cutPoints = findValidCutPoints(entries, startIndex, endIndex, pruneStateById);
 
 	if (cutPoints.length === 0) {
 		return { firstKeptEntryIndex: startIndex, turnStartIndex: -1, isSplitTurn: false };
@@ -417,11 +431,8 @@ export function findCutPoint(
 	let cutIndex = cutPoints[0]; // Default: keep from first message (not header)
 
 	for (let i = endIndex - 1; i >= startIndex; i--) {
-		const entry = entries[i];
-		const messageTokens = sessionEntryToContextMessages(entry).reduce(
-			(sum, message) => sum + estimateTokens(message),
-			0,
-		);
+		const message = getMessageFromEntryForCompaction(entries[i], pruneStateById);
+		const messageTokens = message ? estimateTokens(message) : 0;
 		if (messageTokens === 0) continue;
 		accumulatedTokens += messageTokens;
 
@@ -442,7 +453,7 @@ export function findCutPoint(
 	while (cutIndex > startIndex) {
 		const prevEntry = entries[cutIndex - 1];
 		// Stop at compaction boundaries or context-visible entries.
-		if (prevEntry.type === "compaction" || sessionEntryToContextMessages(prevEntry).length > 0) {
+		if (prevEntry.type === "compaction" || getMessageFromEntryForCompaction(prevEntry, pruneStateById)) {
 			break;
 		}
 		cutIndex--;
@@ -450,8 +461,8 @@ export function findCutPoint(
 
 	// Determine if this is a split turn
 	const cutEntry = entries[cutIndex];
-	const startsTurn = isTurnStartEntry(cutEntry);
-	const turnStartIndex = startsTurn ? -1 : findTurnStartIndex(entries, cutIndex, startIndex);
+	const startsTurn = isTurnStartEntry(cutEntry, pruneStateById);
+	const turnStartIndex = startsTurn ? -1 : findTurnStartIndex(entries, cutIndex, startIndex, pruneStateById);
 
 	return {
 		firstKeptEntryIndex: cutIndex,
@@ -736,6 +747,7 @@ export interface CompactionPreparation {
 export function prepareCompaction(
 	pathEntries: SessionEntry[],
 	settings: CompactionSettings,
+	pruneStateById?: ReadonlyMap<string, PruneState>,
 ): CompactionPreparation | undefined {
 	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction") {
 		return undefined;
@@ -759,9 +771,11 @@ export function prepareCompaction(
 	}
 	const boundaryEnd = pathEntries.length;
 
-	const tokensBefore = estimateContextTokens(buildSessionContext(pathEntries).messages).tokens;
+	const tokensBefore = estimateContextTokens(
+		buildSessionContext(pathEntries, undefined, undefined, pruneStateById).messages,
+	).tokens;
 
-	const cutPoint = findCutPoint(pathEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens);
+	const cutPoint = findCutPoint(pathEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens, pruneStateById);
 
 	// Get UUID of first kept entry
 	const firstKeptEntry = pathEntries[cutPoint.firstKeptEntryIndex];
@@ -775,7 +789,7 @@ export function prepareCompaction(
 	// Messages to summarize (will be discarded after summary)
 	const messagesToSummarize: AgentMessage[] = [];
 	for (let i = boundaryStart; i < historyEnd; i++) {
-		const msg = getMessageFromEntryForCompaction(pathEntries[i]);
+		const msg = getMessageFromEntryForCompaction(pathEntries[i], pruneStateById);
 		if (msg) messagesToSummarize.push(msg);
 	}
 
@@ -783,7 +797,7 @@ export function prepareCompaction(
 	const turnPrefixMessages: AgentMessage[] = [];
 	if (cutPoint.isSplitTurn) {
 		for (let i = cutPoint.turnStartIndex; i < cutPoint.firstKeptEntryIndex; i++) {
-			const msg = getMessageFromEntryForCompaction(pathEntries[i]);
+			const msg = getMessageFromEntryForCompaction(pathEntries[i], pruneStateById);
 			if (msg) turnPrefixMessages.push(msg);
 		}
 	}

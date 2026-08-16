@@ -43,6 +43,11 @@ class PruneList implements Component {
 		this.initialPruned = [...pruned];
 		this.stagedPruned = [...pruned];
 		this.maxVisible = maxVisible;
+		// Start cursor on the newest (last) visible item
+		const visible = this.visibleIndices();
+		if (visible.length > 0) {
+			this.selectedIndex = visible.length - 1;
+		}
 	}
 
 	private visibleIndices(): number[] {

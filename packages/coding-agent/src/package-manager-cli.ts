@@ -32,7 +32,11 @@ import {
 
 export type PackageCommand = "install" | "remove" | "update" | "list";
 
-type UpdateTarget = { type: "all" } | { type: "self" } | { type: "extensions"; source?: string } | { type: "models" };
+export type UpdateTarget =
+	| { type: "all" }
+	| { type: "self" }
+	| { type: "extensions"; source?: string }
+	| { type: "models" };
 
 const SELF_UPDATE_NOTE_MARKDOWN_THEME: MarkdownTheme = {
 	heading: (text) => chalk.bold(chalk.yellow(text)),
@@ -51,7 +55,7 @@ const SELF_UPDATE_NOTE_MARKDOWN_THEME: MarkdownTheme = {
 	underline: (text) => chalk.underline(text),
 };
 
-interface PackageCommandOptions {
+export interface PackageCommandOptions {
 	command: PackageCommand;
 	source?: string;
 	updateTarget?: UpdateTarget;
@@ -186,7 +190,7 @@ Options:
 	}
 }
 
-function parsePackageCommand(args: string[]): PackageCommandOptions | undefined {
+export function parsePackageCommand(args: string[]): PackageCommandOptions | undefined {
 	const [rawCommand, ...rest] = args;
 	let command: PackageCommand | undefined;
 	if (rawCommand === "uninstall") {
@@ -345,7 +349,7 @@ function parsePackageCommand(args: string[]): PackageCommandOptions | undefined 
 			}
 			updateTarget = { type: "extensions", source: extensionFlagSource };
 		} else if (source) {
-			const sourceIsSelf = source === "self" || source === "pi";
+			const sourceIsSelf = source === "self" || source === BINARY_NAME;
 			if (sourceIsSelf) {
 				updateTarget = extensionsFlag ? { type: "all" } : { type: "self" };
 			} else {

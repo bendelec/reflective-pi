@@ -54,4 +54,9 @@ if [[ "$NO_ENV" == "true" ]]; then
   echo "Running without API keys..."
 fi
 
+# The workspace subagent extension uses PI_EXECUTABLE to launch children. Point it
+# back at this wrapper so child sessions use tsx rather than trying to execute the
+# non-executable TypeScript entrypoint directly.
+export PI_EXECUTABLE="${PI_EXECUTABLE:-$SCRIPT_DIR/pi-test.sh}"
+
 "$SCRIPT_DIR/node_modules/.bin/tsx" --tsconfig "$SCRIPT_DIR/tsconfig.json" "$SCRIPT_DIR/packages/coding-agent/src/cli.ts" ${ARGS[@]+"${ARGS[@]}"}

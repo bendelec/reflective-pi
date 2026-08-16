@@ -19,21 +19,57 @@ we're headed. Update as work lands.
 - **Prune MVP (data structure + `buildContextEntries`)** — `PruneEntry` +
   `PruneState` enum, resolved map, `appendPruneChange`, and the
   `buildContextEntries`/`buildSessionContext` filter. Not yet committed.
+- **`prune_context` tool** — TUI tree view + agentic self-curation tool to
+  add/remove prune markers. Context-status message now uses updated context
+  after pruning (fixed agent-loop to pass updated context to
+  `getContextStatusMessages`).
+- **Context snapshot refresh** — `prepareNextTurnWithContext` now refreshes
+  `context.messages` from `agent.state.messages` after each tool call, ensuring
+  pruned entries are excluded from the next server request.
+- **`createBranchedSession` prune filtering** — fork/clone filters and recreates
+  prune entries like labels, including resolved global state from sibling
+  branches.
 
-## Known gaps (prune follow-ups)
+## Audit backlog (resolved locally)
 
-- **`createBranchedSession` (fork/clone)** does not yet filter-and-recreate
-  prune entries the way it does labels. Forking a pruned session carries prune
-  entries whose `targetId` may dangle. Mirror the label handling.
-- **Compaction token estimate** — `compaction.ts` calls the free
-  `buildSessionContext(pathEntries)` without a prune map, so compaction
-  thresholds don't account for pruned entries. Thread the prune map through
-  `compact()`.
+Audit findings retained for release verification. Binary release CI remains the
+integration check for item 1.
+
+1. ~~**P1: Align release artifact names with `rxpi`.** `scripts/build-binaries.sh`
+   ~~emits `rxpi-*` archives, while `.github/workflows/build-binaries.yml` still
+   ~~validates and uploads `pi-*`; release CI currently fails at its asset
+   checks.~~ **Fixed locally; release CI remains the integration check.**
+2. ~~**P1: Never send pruned content to compaction.** `prepareCompaction()` uses
+   ~~the prune map for `tokensBefore`, but builds `messagesToSummarize` and
+   ~~`turnPrefixMessages` from unfiltered entries. An excluded message is therefore
+   ~~sent to the summarization model. Update cut-point/token logic and summary
+   ~~inputs consistently; add a regression test.~~ **Fixed with a regression
+   test.**
+3. ~~**P1: Preserve global prune state when forking a sibling branch.**
+   ~~`createBranchedSession()` reconstructs markers only when their original
+   ~~`prune` entry is on the selected path. A marker created on another branch is
+   ~~absent from the clone, restoring the excluded target. Recreate resolved prune
+   ~~states for every target retained in the cloned path; add a sibling-branch
+   ~~regression test.~~ **Fixed with a sibling-branch regression test.**
+4. ~~**P2: Recognize `rxpi update rxpi` as self-update.** The help text documents
+   ~~it, but the parser accepts only `self` and `pi`; `rxpi` is treated as an
+   ~~extension source. Add parser coverage.~~ **Fixed with parser coverage.**
+5. ~~**P2: Count `contextStatus` messages during compaction estimation.** They are
+   ~~persisted and sent to the model, but `estimateTokens()` returns zero for them,
+   ~~underestimating context usage and delaying compaction.~~ **Fixed with token
+   estimation and cut-point regression tests.**
+6. ~~**P2: Repair resume-command test expectations.**
+   ~~`test/format-resume-command.test.ts` still expects `APP_NAME` (`pi`) instead
+   ~~of the user-facing `BINARY_NAME` (`rxpi`); four assertions fail.~~ **Fixed.**
+7. ~~**P2: Update prune documentation.** `docs/prune.md` says the selector and
+   ~~agentic tool are planned, and `docs/context-building.md` omits `prune` from
+   ~~`SessionEntry` types.~~ **Fixed.**
+8. ~~**P2: Rename the transcript-analysis subagent command.**
+   ~~`scripts/session-transcripts.ts --analyze` hardcodes `spawn("pi", ...)`, so
+   ~~it fails for an `rxpi`-only installation.~~ **Fixed.**
 
 ## Future work
 
-- **Prune UI/tool** — TUI tree view + agentic self-curation tool to add/remove
-  prune markers (atomic groups selected together).
 - **Per-group token accounting** — attribute exact token counts to prune groups
   from the server-reported context delta per assistant response, not content
   heuristics (chars/4). Enables smarter prune decisions (group token cost shown

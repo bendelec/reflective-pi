@@ -1,4 +1,4 @@
-import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, type Harness } from "./harness.ts";
 
@@ -61,5 +61,107 @@ describe("AgentSession setPruneState", () => {
 
 		harness.session.setPruneState([user, assistant.id], "excluded");
 		expect(harness.session.messages).toEqual([]);
+	});
+
+	it("prunes context via the prune_context tool", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		harness.setResponses([fauxAssistantMessage("hello back")]);
+		await harness.session.prompt("hello");
+
+		expect(harness.session.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+
+		// The id of the first user message, as the tool would list it.
+		const user = userEntryId(harness);
+
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("prune_context", { ids: [user] })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		await harness.session.prompt("prune the first message");
+
+		// The first user message ("hello") is pruned from the live context.
+		const hello = harness.session.messages.find((m) => m.role === "user" && m.content === "hello");
+		expect(hello).toBeUndefined();
+	});
+
+	it("lists blocks with ids via prune_context without arguments", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		harness.setResponses([fauxAssistantMessage("hello back")]);
+		await harness.session.prompt("hello");
+
+		const user = userEntryId(harness);
+
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("prune_context", {})], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		await harness.session.prompt("list blocks");
+
+		// The tool result should list the user block id and its preview.
+		const result = harness.session.messages.find((m) => m.role === "toolResult");
+		expect(result).toBeDefined();
+		const text = result!.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+		expect(text).toContain(user);
+		expect(text).toContain("user: hello");
+	});
+
+	it("includes the context-curation guide in the system prompt", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		const prompt = harness.session.systemPrompt;
+		expect(prompt).toContain("prune_context");
+		expect(prompt).toContain("valuable, limited resource");
+	});
+
+	it("returns error for malformed parameters", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		harness.setResponses([fauxAssistantMessage("hello back")]);
+		await harness.session.prompt("hello");
+
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("prune_context", { wrong: "param" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		await harness.session.prompt("try malformed params");
+
+		const result = harness.session.messages.find((m) => m.role === "toolResult");
+		expect(result).toBeDefined();
+		const text = result!.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+		expect(text).toContain("Error: Invalid parameters");
+		expect(text).toContain("no parameters to list");
+	});
+
+	it("returns error when ids is not an array", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		harness.setResponses([fauxAssistantMessage("hello back")]);
+		await harness.session.prompt("hello");
+
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("prune_context", { ids: "not-an-array" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		await harness.session.prompt("try non-array ids");
+
+		const result = harness.session.messages.find((m) => m.role === "toolResult");
+		expect(result).toBeDefined();
+		const text = result!.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+		expect(text).toContain("Error: 'ids' must be an array");
+	});
+
+	it("returns error when ids contains non-string values", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		harness.setResponses([fauxAssistantMessage("hello back")]);
+		await harness.session.prompt("hello");
+
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("prune_context", { ids: [123, "valid-id"] })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		await harness.session.prompt("try non-string ids");
+
+		const result = harness.session.messages.find((m) => m.role === "toolResult");
+		expect(result).toBeDefined();
+		const text = result!.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+		expect(text).toContain("Error: All ids must be strings");
+		expect(text).toContain("123");
 	});
 });

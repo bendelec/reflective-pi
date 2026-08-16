@@ -46,6 +46,7 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
+import { Type } from "typebox";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
@@ -105,6 +106,7 @@ import {
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
+import { groupPruneBlocks, type PruneBlock, previewBlock } from "./prune.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import type {
 	BranchSummaryEntry,
@@ -362,6 +364,8 @@ export class AgentSession {
 	// Context status tracking (system-injected `contextStatus` messages)
 	private _contextStatusLastPercent: number | null = null;
 	private _contextStatusTurnStartPercent: number | null = null;
+	private _contextStatusForceNext = false;
+	private _pruneHappenedThisTurn = false;
 
 	private _resourceLoader: ResourceLoader;
 	private _customTools: ToolDefinition[];
@@ -574,6 +578,7 @@ export class AgentSession {
 				context: {
 					...previousContext,
 					systemPrompt: this._systemPromptOverride ?? this._baseSystemPrompt,
+					messages: this.agent.state.messages.slice(),
 					tools: this.agent.state.tools.slice(),
 				},
 				model: this.agent.state.model,
@@ -595,6 +600,13 @@ export class AgentSession {
 			// results) would otherwise be forced into an extra assistant response, which
 			// cascades into an infinite loop once context is >= 80%.
 			if (context.toolResults.length === 0) {
+				return [];
+			}
+			// Skip context-status message if pruning happened this turn.
+			// The usage data is stale (from before pruning), so wait for the next
+			// server response with the pruned context before reporting status.
+			if (this._pruneHappenedThisTurn) {
+				this._pruneHappenedThisTurn = false;
 				return [];
 			}
 			const message = this._maybeBuildContextStatusMessage();
@@ -625,6 +637,12 @@ export class AgentSession {
 			this._contextStatusLastPercent = percent;
 			return createContextStatusMessage(contextWindow, Math.round(tokens), percent, Date.now());
 		};
+
+		// Force a message after prune operations so the user can verify the pruning worked
+		if (this._contextStatusForceNext) {
+			this._contextStatusForceNext = false;
+			return build();
+		}
 
 		if (percent >= 80) {
 			return build();
@@ -1945,6 +1963,7 @@ export class AgentSession {
 			this.sessionManager.appendPruneChange(entryId, state);
 		}
 		this.agent.state.messages = this.sessionManager.buildSessionContext().messages;
+		this._pruneHappenedThisTurn = true;
 	}
 
 	// =========================================================================
@@ -2008,8 +2027,9 @@ export class AgentSession {
 
 			const pathEntries = this.sessionManager.getBranch();
 			const settings = this.settingsManager.getCompactionSettings();
+			const pruneStateById = this.sessionManager.getPruneStateMap();
 
-			const preparation = prepareCompaction(pathEntries, settings);
+			const preparation = prepareCompaction(pathEntries, settings, pruneStateById);
 			if (!preparation) {
 				// Check why we can't compact
 				const lastEntry = pathEntries[pathEntries.length - 1];
@@ -2310,8 +2330,9 @@ export class AgentSession {
 			const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(this.model);
 
 			const pathEntries = this.sessionManager.getBranch();
+			const pruneStateById = this.sessionManager.getPruneStateMap();
 
-			const preparation = prepareCompaction(pathEntries, settings);
+			const preparation = prepareCompaction(pathEntries, settings, pruneStateById);
 			if (!preparation) {
 				return false;
 			}
@@ -2814,6 +2835,154 @@ export class AgentSession {
 		this.setActiveToolsByName([...new Set(nextActiveToolNames)]);
 	}
 
+	/**
+	 * Create the session-aware `prune_context` tool.
+	 *
+	 * Lets the model prune (exclude) message groups from its own context by
+	 * message id — the id of each block's first message, as shown by calling
+	 * prune_context without arguments. Called with no ids, it lists the current
+	 * blocks with their ids and previews.
+	 */
+	private _createPruneToolDefinition(): ToolDefinition {
+		// Use a permissive schema to avoid type coercion, then validate manually in execute
+		const schema = Type.Object({
+			ids: Type.Optional(Type.Any()),
+		});
+
+		const truncateLine = (text: string, maxLength = 120): string =>
+			text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+
+		return {
+			name: "prune_context",
+			label: "Prune Context",
+			description:
+				'Prune (exclude) message groups from your context that are no longer needed, to keep your context small and focused. Call prune_context with no parameters to list the current blocks and their ids, then call it with the ids parameter containing an array of block ids to prune. Each block is pruned atomically (tool calls stay with their results). Pruning is reversible and does not delete history. Example: to list blocks, call prune_context with no parameters. To prune specific blocks, call prune_context with parameters: {"ids": ["id1", "id2"]}.',
+			promptSnippet: "Prune stale messages from your context to keep it small and focused.",
+			promptGuidelines: [
+				"Treat your context window as a valuable, limited resource. Keep it clean proactively: prune messages that are stale or no longer needed, because a smaller, cleaner context without stale content usually translates directly into better results.",
+			],
+			parameters: schema,
+			execute: async (_toolCallId, params) => {
+				// Validate input format
+				// Note: Schema validation may not be enforced by all test harnesses,
+				// so we validate here as well to ensure proper error handling
+				const hasIdsProperty = params && typeof params === "object" && "ids" in params;
+				const isEmptyParams = !params || (typeof params === "object" && Object.keys(params).length === 0);
+
+				// List mode: no parameters at all
+				if (isEmptyParams) {
+					const blocks = groupPruneBlocks(this.sessionManager.buildContextEntries());
+					const lines: string[] = [];
+					for (const block of blocks) {
+						const preview = previewBlock(block);
+						const blockId = block.entryIds[0] ?? "(no id)";
+						lines.push(`${blockId}  ${truncateLine(preview.line)}`);
+						for (const detail of preview.detail) {
+							lines.push(`          ${truncateLine(detail)}`);
+						}
+					}
+					const text =
+						lines.length > 0
+							? `Current context blocks (${blocks.length}) — prune by id:\n${lines.join("\n")}`
+							: "No context blocks to list.";
+					return { content: [{ type: "text", text }], details: {} };
+				}
+
+				// Prune mode: must have 'ids' property
+				if (!hasIdsProperty) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: 'Error: Invalid parameters. Call prune_context with no parameters to list blocks, or with {"ids": ["id1", "id2"]} to prune specific blocks.',
+							},
+						],
+						details: {},
+					};
+				}
+
+				const ids = (params as { ids?: unknown }).ids;
+
+				// Handle case where ids comes as a JSON string (provider serialization issue)
+				let parsedIds = ids;
+				if (typeof ids === "string") {
+					try {
+						parsedIds = JSON.parse(ids);
+					} catch {
+						// Not valid JSON, will fail validation below
+					}
+				}
+
+				// Validate ids is an array
+				if (!Array.isArray(parsedIds)) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: 'Error: \'ids\' must be an array of block ids. Example: {"ids": ["id1", "id2"]}',
+							},
+						],
+						details: {},
+					};
+				}
+
+				// Validate all ids are strings
+				const invalidIds = parsedIds.filter((id) => typeof id !== "string");
+				if (invalidIds.length > 0) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Error: All ids must be strings. Found invalid ids: ${invalidIds.join(", ")}`,
+							},
+						],
+						details: {},
+					};
+				}
+
+				// Prune the blocks
+				const blocks = groupPruneBlocks(this.sessionManager.buildContextEntries());
+				const blockById = new Map<string, PruneBlock>(blocks.map((block) => [block.entryIds[0]!, block]));
+				const matched: PruneBlock[] = [];
+				const unknown: string[] = [];
+				const seen = new Set<string>();
+
+				for (const rawId of parsedIds) {
+					const id = rawId.trim();
+					if (!id || seen.has(id)) continue;
+					seen.add(id);
+					const block = blockById.get(id);
+					if (block) matched.push(block);
+					else unknown.push(id);
+				}
+
+				for (const block of matched) {
+					this.setPruneState(block.entryIds, "excluded");
+				}
+
+				// Context shrunk after pruning; the old percent baseline is stale.
+				this._contextStatusLastPercent = null;
+				// Force a context-status message on the next turn so the user can verify the pruning worked
+				this._contextStatusForceNext = true;
+
+				const prunedLines = matched.map((block) => truncateLine(previewBlock(block).line));
+				const lines: string[] = [];
+				lines.push(`Pruned ${matched.length} block(s).`);
+				if (prunedLines.length > 0) {
+					lines.push("");
+					for (const line of prunedLines) {
+						lines.push(`  - ${line}`);
+					}
+				}
+				if (unknown.length > 0) {
+					lines.push("");
+					lines.push(`Unknown id(s): ${unknown.join(", ")}.`);
+				}
+				return { content: [{ type: "text", text: lines.join("\n") }], details: {} };
+			},
+		};
+	}
+
 	private _buildRuntime(options: {
 		activeToolNames?: string[];
 		flagValues?: Map<string, boolean | string>;
@@ -2837,6 +3006,7 @@ export class AgentSession {
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
+		this._baseToolDefinitions.set("prune_context", this._createPruneToolDefinition());
 
 		const extensionsResult = this._resourceLoader.getExtensions();
 		if (options.flagValues) {
@@ -2863,7 +3033,7 @@ export class AgentSession {
 			: ["read", "bash", "edit", "write"];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
-			activeToolNames: baseActiveToolNames,
+			activeToolNames: [...baseActiveToolNames, "prune_context"],
 			includeAllExtensionTools: options.includeAllExtensionTools,
 		});
 	}

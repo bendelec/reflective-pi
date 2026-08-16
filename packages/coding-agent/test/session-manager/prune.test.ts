@@ -198,6 +198,21 @@ describe("SessionManager prune markers", () => {
 		expect(session.buildSessionContext().messages.map((m) => m.role)).toEqual(["user", "assistant"]);
 	});
 
+	it("preserves global prune state when extracting a sibling branch", () => {
+		const session = SessionManager.inMemory();
+		const rootId = session.appendMessage({ role: "user", content: "SECRET", timestamp: 1 });
+		session.appendMessage({ role: "user", content: "first branch", timestamp: 2 });
+		session.appendPruneChange(rootId, "excluded");
+
+		session.branch(rootId);
+		const siblingLeafId = session.appendMessage({ role: "user", content: "sibling branch", timestamp: 3 });
+		expect(session.buildSessionContext().messages.map((message) => message.role)).toEqual(["user"]);
+
+		session.createBranchedSession(siblingLeafId);
+		expect(session.getPruneState(rootId)).toBe("excluded");
+		expect(session.buildSessionContext().messages.map((message) => message.role)).toEqual(["user"]);
+	});
+
 	it("prune entries themselves are not projected into context", () => {
 		const session = SessionManager.inMemory();
 

@@ -33,7 +33,7 @@ important thing to internalize:
 The node type is `SessionEntry` (in `session-manager.ts`). Every entry has:
 
 - `type` — `message`, `thinking_level_change`, `model_change`, `compaction`,
-  `branch_summary`, `custom`, `custom_message`, `label`, `session_info`
+  `branch_summary`, `custom`, `custom_message`, `label`, `prune`, `session_info`
 - `id` — unique short hex id
 - `parentId` — id of the parent entry (`null` for the root)
 - `timestamp`
@@ -73,8 +73,8 @@ The single entry point is `SessionManager.buildSessionContext()` →
 2. `getSessionContextSettings(path)` — scans the path for the latest
    `thinking_level_change`, `model_change`, and assistant message to recover
    `thinkingLevel` and `model`.
-3. `buildContextEntries(entries, leafId, byId)` — the compaction-aware
-   truncation:
+3. `buildContextEntries(entries, leafId, byId, pruneStateById)` — the
+   compaction-aware truncation:
    - Take the path.
    - Find the **last** `compaction` entry in the path.
    - If none, return the whole path.
@@ -82,13 +82,18 @@ The single entry point is `SessionManager.buildSessionContext()` →
      not including) the compaction entry, ...entries after the compaction entry]`.
    - Result: the compaction summary entry + the "retained tail" (entries kept at
      compaction time) + everything appended since.
+   - Finally, filter out entries whose resolved prune state is `"excluded"`.
+     The compaction truncation is computed on the unfiltered path: a pruned
+     `compaction` entry still truncates history, its summary is merely omitted
+     from the result.
 4. `sessionEntryToContextMessages(entry)` — projects each entry to zero or more
    `AgentMessage`s:
    - `message` → `[message]`
    - `custom_message` → `[custom message]`
    - `branch_summary` → `[branch summary message]`
    - `compaction` → `[compaction summary message]`
-   - everything else → `[]`
+   - `prune` (and other bookkeeping entries) → `[]` — a `prune` entry is a
+     marker on a target message, not itself a context message.
 
 Step 3 flat-mapped through step 4 gives the final `messages: AgentMessage[]`.
 

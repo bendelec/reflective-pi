@@ -1277,6 +1277,14 @@ export class SessionManager {
 	}
 
 	/**
+	 * Returns the full prune state map (entry id -> PruneState).
+	 * Entries not in the map are implicitly "included".
+	 */
+	getPruneStateMap(): ReadonlyMap<string, PruneState> {
+		return this.pruneStateById;
+	}
+
+	/**
 	 * Set or clear a label on an entry.
 	 * Labels are user-defined markers for bookmarking/navigation.
 	 * Pass undefined or empty string to clear the label.
@@ -1504,14 +1512,14 @@ export class SessionManager {
 			throw new Error(`Entry ${leafId} not found`);
 		}
 
-		// Filter out LabelEntry from path - we'll recreate them from the resolved map.
-		// Because labels are real tree entries, later entries can be children of labels;
-		// removing labels requires re-chaining the retained path to avoid orphaned subtrees.
-		const pathWithoutLabels: SessionEntry[] = [];
+		// Filter out LabelEntry and PruneEntry from path - we'll recreate them from the resolved maps.
+		// Because labels and prune entries are real tree entries, later entries can be children of them;
+		// removing them requires re-chaining the retained path to avoid orphaned subtrees.
+		const pathWithoutLabelsAndPrunes: SessionEntry[] = [];
 		let pathParentId: string | null = null;
 		for (const entry of path) {
-			if (entry.type === "label") continue;
-			pathWithoutLabels.push({ ...entry, parentId: pathParentId });
+			if (entry.type === "label" || entry.type === "prune") continue;
+			pathWithoutLabelsAndPrunes.push({ ...entry, parentId: pathParentId });
 			pathParentId = entry.id;
 		}
 
@@ -1529,8 +1537,8 @@ export class SessionManager {
 			parentSession: this.persist ? previousSessionFile : undefined,
 		};
 
-		// Collect labels for entries in the path
-		const pathEntryIds = new Set(pathWithoutLabels.map((e) => e.id));
+		// Collect labels and prune states for entries in the path
+		const pathEntryIds = new Set(pathWithoutLabelsAndPrunes.map((e) => e.id));
 		const labelsToWrite: Array<{ targetId: string; label: string; timestamp: string }> = [];
 		for (const [targetId, label] of this.labelsById) {
 			if (pathEntryIds.has(targetId)) {
@@ -1538,9 +1546,25 @@ export class SessionManager {
 			}
 		}
 
+		// Collect prune states for entries in the path
+		const prunesToWrite: Array<{ targetId: string; state: PruneState; timestamp: string }> = [];
+		for (const [targetId, state] of this.pruneStateById) {
+			if (!pathEntryIds.has(targetId)) continue;
+
+			// Prune state is global, so its latest marker can be on a sibling branch.
+			// Find it in the complete session rather than only in the selected path.
+			for (let i = this.fileEntries.length - 1; i >= 0; i--) {
+				const entry = this.fileEntries[i];
+				if (entry.type === "prune" && entry.targetId === targetId) {
+					prunesToWrite.push({ targetId, state, timestamp: entry.timestamp });
+					break;
+				}
+			}
+		}
+
 		if (this.persist) {
-			// Build label entries
-			const lastEntryId = pathWithoutLabels[pathWithoutLabels.length - 1]?.id || null;
+			// Build label and prune entries
+			const lastEntryId = pathWithoutLabelsAndPrunes[pathWithoutLabelsAndPrunes.length - 1]?.id || null;
 			let parentId = lastEntryId;
 			const labelEntries: LabelEntry[] = [];
 			for (const { targetId, label, timestamp: labelTimestamp } of labelsToWrite) {
@@ -1557,7 +1581,22 @@ export class SessionManager {
 				parentId = labelEntry.id;
 			}
 
-			this.fileEntries = [header, ...pathWithoutLabels, ...labelEntries];
+			const pruneEntries: PruneEntry[] = [];
+			for (const { targetId, state, timestamp: pruneTimestamp } of prunesToWrite) {
+				const pruneEntry: PruneEntry = {
+					type: "prune",
+					id: generateId(new Set(pathEntryIds)),
+					parentId,
+					timestamp: pruneTimestamp,
+					targetId,
+					state,
+				};
+				pathEntryIds.add(pruneEntry.id);
+				pruneEntries.push(pruneEntry);
+				parentId = pruneEntry.id;
+			}
+
+			this.fileEntries = [header, ...pathWithoutLabelsAndPrunes, ...labelEntries, ...pruneEntries];
 			this.sessionId = newSessionId;
 			this.sessionFile = newSessionFile;
 			this._buildIndex();
@@ -1578,9 +1617,9 @@ export class SessionManager {
 			return newSessionFile;
 		}
 
-		// In-memory mode: replace current session with the path + labels
+		// In-memory mode: replace current session with the path + labels + prunes
 		const labelEntries: LabelEntry[] = [];
-		let parentId = pathWithoutLabels[pathWithoutLabels.length - 1]?.id || null;
+		let parentId = pathWithoutLabelsAndPrunes[pathWithoutLabelsAndPrunes.length - 1]?.id || null;
 		for (const { targetId, label, timestamp: labelTimestamp } of labelsToWrite) {
 			const labelEntry: LabelEntry = {
 				type: "label",
@@ -1593,7 +1632,24 @@ export class SessionManager {
 			labelEntries.push(labelEntry);
 			parentId = labelEntry.id;
 		}
-		this.fileEntries = [header, ...pathWithoutLabels, ...labelEntries];
+
+		const pruneEntries: PruneEntry[] = [];
+		for (const { targetId, state, timestamp: pruneTimestamp } of prunesToWrite) {
+			const pruneEntry: PruneEntry = {
+				type: "prune",
+				id: generateId(
+					new Set([...pathEntryIds, ...labelEntries.map((e) => e.id), ...pruneEntries.map((e) => e.id)]),
+				),
+				parentId,
+				timestamp: pruneTimestamp,
+				targetId,
+				state,
+			};
+			pruneEntries.push(pruneEntry);
+			parentId = pruneEntry.id;
+		}
+
+		this.fileEntries = [header, ...pathWithoutLabelsAndPrunes, ...labelEntries, ...pruneEntries];
 		this.sessionId = newSessionId;
 		this._buildIndex();
 		return undefined;

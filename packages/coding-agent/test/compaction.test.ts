@@ -21,6 +21,7 @@ import {
 	type CustomMessageEntry,
 	type ModelChangeEntry,
 	migrateSessionEntries,
+	type PruneState,
 	parseSessionEntries,
 	type SessionEntry,
 	type SessionMessageEntry,
@@ -271,6 +272,41 @@ describe("estimateContextTokens", () => {
 	});
 });
 
+describe("contextStatus token estimation", () => {
+	it("counts persisted contextStatus messages in estimateContextTokens", () => {
+		const status = {
+			role: "contextStatus" as const,
+			content: "[context-status] window 128,000 · used 45,230 (35.3%)",
+			percent: 35.3,
+			timestamp: Date.now(),
+		};
+
+		const estimate = estimateContextTokens([status]);
+
+		expect(estimate.tokens).toBe(Math.ceil(status.content.length / 4));
+		expect(estimate.tokens).toBeGreaterThan(0);
+	});
+
+	it("budgets contextStatus messages when finding the cut point", () => {
+		const status = {
+			role: "contextStatus" as const,
+			content: "x".repeat(4000),
+			percent: 50,
+			timestamp: Date.now(),
+		};
+		const entries: SessionEntry[] = [
+			createMessageEntry(createUserMessage("hi")),
+			createMessageEntry(createAssistantMessage("hello")),
+			createMessageEntry(status),
+			createMessageEntry(createAssistantMessage("ok")),
+		];
+
+		const result = findCutPoint(entries, 0, entries.length, 500);
+
+		expect(result.firstKeptEntryIndex).toBe(3);
+	});
+});
+
 describe("shouldCompact", () => {
 	it("should return true when context exceeds threshold", () => {
 		const settings: CompactionSettings = {
@@ -462,6 +498,22 @@ describe("buildSessionContext", () => {
 });
 
 describe("prepareCompaction with previous compaction", () => {
+	it("does not summarize excluded entries", () => {
+		const excluded = createMessageEntry(createUserMessage("SECRET: do not summarize"));
+		const visible = createMessageEntry(createUserMessage("visible history"));
+		const recent = createMessageEntry(createUserMessage("visible recent"));
+		const pruneStateById = new Map<string, PruneState>([[excluded.id, "excluded"]]);
+
+		const preparation = prepareCompaction(
+			[excluded, visible, recent],
+			{ enabled: true, reserveTokens: 0, keepRecentTokens: 0 },
+			pruneStateById,
+		);
+
+		expect(preparation).toBeDefined();
+		expect(extractText(preparation!.messagesToSummarize)).toBe("visible history");
+	});
+
 	it("should skip repeated compactions when kept messages still fit", () => {
 		const u1 = createMessageEntry(createUserMessage("user msg 1 (summarized by compaction1)"));
 		const a1 = createMessageEntry(createAssistantMessage("assistant msg 1"));

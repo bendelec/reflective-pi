@@ -256,8 +256,15 @@ async function runLoop(
 				return;
 			}
 
+			// Use updated context for steering/context-status messages
+			const updatedTurnContext = {
+				message,
+				toolResults,
+				context: currentContext,
+				newMessages,
+			};
 			const steering = (await config.getSteeringMessages?.()) || [];
-			const contextStatus = (await config.getContextStatusMessages?.(nextTurnContext)) || [];
+			const contextStatus = (await config.getContextStatusMessages?.(updatedTurnContext)) || [];
 			pendingMessages = [...steering, ...contextStatus];
 		}
 

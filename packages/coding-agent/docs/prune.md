@@ -6,9 +6,9 @@ lighter-weight alternative to legacy compaction.
 ## Status
 
 - **Data model + `buildContextEntries` filter**: implemented.
-- **Atomic grouping + preview**: next.
-- **TUI `/prune` command**: planned.
-- **Agentic self-curation tool**: planned, after the TUI tool.
+- **Atomic grouping + preview**: implemented (`packages/coding-agent/src/core/prune.ts`).
+- **TUI `/prune` command**: implemented (`packages/coding-agent/src/modes/interactive/components/prune-selector.ts`).
+- **Agentic self-curation tool** (`prune_context`): implemented (see [Agentic tool](#agentic-tool)).
 
 ## Data model (implemented)
 
@@ -51,20 +51,50 @@ Soft edge cases (note, not enforced in MVP):
 
 ## TUI command
 
-A dedicated `/prune` command (not integrated into `/tree`).
+A dedicated `/prune` command (not integrated into `/tree`). It opens
+`PruneSelectorComponent` (`prune-selector.ts`), a linear list of atomic blocks.
 
-- Linear view of the current branch from the last compaction boundary
-  (`buildContextEntries` output).
-- Default mode: **included only** (pruning). Toggle to **all** (restoration),
-  where pruned items are marked and selectable to restore.
+- The block source is `buildContextEntriesAll()` — the compaction-truncated
+  path **ignoring** prune markers — so pruned blocks are still present and can
+  be restored.
+- Default view: **included only** (pruned blocks hidden). `Ctrl+A` toggles
+  **show all**, where pruned blocks are marked `[pruned]` and selectable to
+  restore.
 - One command, one selector, two filter states — pruning and restoring are the
   same interaction (toggle prune state), so a second command would duplicate the
   selector for a one-bit filter difference.
 
-The two modes use different entry lists:
+Interaction is staged and committed atomically:
 
-- "included" = `buildContextEntries(entries, leafId, byId, pruneStateById)`.
-- "all" = `buildContextEntries(entries, leafId, byId)` (no prune map).
+- `Up`/`Down` move the cursor (wrapping).
+- `Space` toggles the selected block's state locally (staged); changed blocks
+  show a `*` suffix and a `[N changes]` counter in the status line.
+- `Enter` commits all staged changes as `appendPruneChange` calls and closes.
+- `Escape`/`Ctrl+C` aborts without committing.
+
+Visibility is filtered client-side from `initialPruned` (the resolved prune
+state of each block), not by rebuilding the entry list.
+
+## Agentic tool
+
+`AgentSession` registers a `prune_context` tool (`agent-session.ts`,
+`_createPruneToolDefinition`) so the model can curate its own context. It is
+always active (appended to the default active-tool list in `_buildRuntime`).
+
+Two modes, selected by arguments:
+
+- **List** — called with no parameters, it prints the current context blocks
+  (via `groupPruneBlocks(buildContextEntries())`) with each block's id and
+  preview. The id is the block's first entry id; that id is what prune mode
+  accepts.
+- **Prune** — `{"ids": ["id1", "id2"]}` marks each matched block `"excluded"`
+  via `setPruneState`. Each block is pruned atomically (tool calls stay with
+  their results). Unknown ids are reported but ignored; pruning is reversible
+  and does not delete history.
+
+After pruning, the tool clears the cached context-status percent baseline and
+forces a context-status message on the next turn so the user can verify the
+resulting shrink.
 
 ## Layout
 

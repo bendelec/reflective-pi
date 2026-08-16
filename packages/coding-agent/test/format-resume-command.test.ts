@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { APP_NAME } from "../src/config.ts";
+import { BINARY_NAME } from "../src/config.ts";
 import type { SessionManager } from "../src/core/session-manager.ts";
 import { formatResumeCommand } from "../src/modes/interactive/interactive-mode.ts";
 
@@ -55,7 +55,7 @@ describe("formatResumeCommand", () => {
 		const sessionFile = createTempFile();
 		const sessionManager = createSessionManager({ sessionFile, sessionId: "test-session" });
 
-		expect(formatResumeCommand(sessionManager)).toBe(`${APP_NAME} --session test-session`);
+		expect(formatResumeCommand(sessionManager)).toBe(`${BINARY_NAME} --session test-session`);
 	});
 
 	it("includes unquoted safe session dirs for non-default session dirs", () => {
@@ -69,7 +69,7 @@ describe("formatResumeCommand", () => {
 		});
 
 		expect(formatResumeCommand(sessionManager)).toBe(
-			`${APP_NAME} --session-dir /tmp/custom-pi-sessions --session test-session`,
+			`${BINARY_NAME} --session-dir /tmp/custom-pi-sessions --session test-session`,
 		);
 	});
 
@@ -84,7 +84,7 @@ describe("formatResumeCommand", () => {
 		});
 
 		expect(formatResumeCommand(sessionManager)).toBe(
-			`${APP_NAME} --session-dir '/tmp/custom pi sessions' --session test-session`,
+			`${BINARY_NAME} --session-dir '/tmp/custom pi sessions' --session test-session`,
 		);
 	});
 
@@ -99,7 +99,7 @@ describe("formatResumeCommand", () => {
 		});
 
 		expect(formatResumeCommand(sessionManager)).toBe(
-			`${APP_NAME} --session-dir '/tmp/custom pi'\\''s sessions' --session test-session`,
+			`${BINARY_NAME} --session-dir '/tmp/custom pi'\\''s sessions' --session test-session`,
 		);
 	});
 

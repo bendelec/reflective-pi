@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed tool callbacks updating the live context before the next model request.
+
 ## [0.84.2] - 2026-08-14
 
 ### Fixed
