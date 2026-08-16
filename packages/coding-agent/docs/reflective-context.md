@@ -100,17 +100,19 @@ in both directions. This is a convenience on top of the agentic tool, not the
 primary mechanism: the model can curate its context without the user, and the
 user can review or reverse that curation here.
 
-## Not implemented
+## Planned follow-up work
 
-This is a concise MVP. The following are deliberately out of scope and therefore
-**not** claimed anywhere:
+This is a concise MVP. If the initial experiments demonstrate that reflective
+context curation improves results, the planned follow-up work is:
 
-- **Per-block token accounting or previews.** The prune UI does not show token
-  counts per block or estimate freed tokens.
-- **Per-turn status insertion.** `[context-status]` messages are emitted on the
-  thresholds above, not on every turn.
-- **A `"summarized"` prune state.** A pruned block is either excluded or
-  included; there is no mini-summary replacement yet.
+- **Per-block token accounting or previews.** The prune UI does not yet show
+  token counts per block or estimate freed tokens.
+- **A `"summarized"` prune state.** A pruned block is currently either excluded
+  or included; there is no mini-summary replacement yet.
+
+Per-turn status insertion is not planned. Threshold-triggered status messages
+are intentional: they provide useful awareness without creating noise or forcing
+unnecessary follow-up turns.
 
 ## Where it lives
 
