@@ -115,6 +115,27 @@ export interface LabelEntry extends SessionEntryBase {
 	label: string | undefined;
 }
 
+/**
+ * Per-message context-inclusion state. Latest-wins; resolved in _buildIndex.
+ *
+ * "excluded" removes the message from context (pruned). "included" is the
+ * default (absence from the resolved map). "summarized" will be added later;
+ * it marks a message as replaced by a group summary entry.
+ *
+ * NOTE: prune markers are currently GLOBAL (not branch-scoped). This is a
+ * temporary limitation. When the session layer migrates to harness-v2 lanes,
+ * prune markers will gain a branchId and become per-lane. Do not build
+ * branch-specific behavior on this.
+ */
+export type PruneState = "included" | "excluded";
+
+/** Entry recording a prune/unprune marker on a target message entry. */
+export interface PruneEntry extends SessionEntryBase {
+	type: "prune";
+	targetId: string;
+	state: PruneState;
+}
+
 /** Session metadata entry (e.g., user-defined display name). */
 export interface SessionInfoEntry extends SessionEntryBase {
 	type: "session_info";
@@ -151,6 +172,7 @@ export type SessionEntry =
 	| CustomEntry
 	| CustomMessageEntry
 	| LabelEntry
+	| PruneEntry
 	| SessionInfoEntry;
 
 /** Raw file entry (includes header) */
@@ -420,6 +442,7 @@ export function buildContextEntries(
 	entries: SessionEntry[],
 	leafId?: string | null,
 	byId?: Map<string, SessionEntry>,
+	pruneStateById?: ReadonlyMap<string, PruneState>,
 ): SessionEntry[] {
 	const path = buildSessionPath(entries, leafId, byId);
 	let compaction: CompactionEntry | null = null;
@@ -430,27 +453,36 @@ export function buildContextEntries(
 		}
 	}
 
+	let contextEntries: SessionEntry[];
 	if (!compaction) {
-		return path;
+		contextEntries = path;
+	} else {
+		const compactionIdx = path.findIndex((entry) => entry.id === compaction.id);
+		if (compactionIdx < 0) {
+			contextEntries = path;
+		} else {
+			contextEntries = [compaction];
+			let foundFirstKept = false;
+			for (let i = 0; i < compactionIdx; i++) {
+				const entry = path[i];
+				if (entry.id === compaction.firstKeptEntryId) {
+					foundFirstKept = true;
+				}
+				if (foundFirstKept) {
+					contextEntries.push(entry);
+				}
+			}
+			contextEntries.push(...path.slice(compactionIdx + 1));
+		}
 	}
 
-	const compactionIdx = path.findIndex((entry) => entry.id === compaction.id);
-	if (compactionIdx < 0) {
-		return path;
+	// Exclude pruned entries. The compaction truncation above is computed on the
+	// unfiltered path: a pruned compaction entry still truncates history, its
+	// summary is merely omitted from the result.
+	if (pruneStateById && pruneStateById.size > 0) {
+		contextEntries = contextEntries.filter((entry) => pruneStateById.get(entry.id) !== "excluded");
 	}
 
-	const contextEntries: SessionEntry[] = [compaction];
-	let foundFirstKept = false;
-	for (let i = 0; i < compactionIdx; i++) {
-		const entry = path[i];
-		if (entry.id === compaction.firstKeptEntryId) {
-			foundFirstKept = true;
-		}
-		if (foundFirstKept) {
-			contextEntries.push(entry);
-		}
-	}
-	contextEntries.push(...path.slice(compactionIdx + 1));
 	return contextEntries;
 }
 
@@ -463,10 +495,11 @@ export function buildSessionContext(
 	entries: SessionEntry[],
 	leafId?: string | null,
 	byId?: Map<string, SessionEntry>,
+	pruneStateById?: ReadonlyMap<string, PruneState>,
 ): SessionContext {
 	const path = buildSessionPath(entries, leafId, byId);
 	const { thinkingLevel, model } = getSessionContextSettings(path);
-	const messages = buildContextEntries(entries, leafId, byId).flatMap(sessionEntryToContextMessages);
+	const messages = buildContextEntries(entries, leafId, byId, pruneStateById).flatMap(sessionEntryToContextMessages);
 	return { messages, thinkingLevel, model };
 }
 
@@ -864,6 +897,7 @@ export class SessionManager {
 	private byId: Map<string, SessionEntry> = new Map();
 	private labelsById: Map<string, string> = new Map();
 	private labelTimestampsById: Map<string, string> = new Map();
+	private pruneStateById: Map<string, PruneState> = new Map();
 	private leafId: string | null = null;
 
 	private constructor(
@@ -946,6 +980,7 @@ export class SessionManager {
 		this.byId.clear();
 		this.labelsById.clear();
 		this.labelTimestampsById.clear();
+		this.pruneStateById.clear();
 		this.leafId = null;
 		this.flushed = false;
 
@@ -960,6 +995,7 @@ export class SessionManager {
 		this.byId.clear();
 		this.labelsById.clear();
 		this.labelTimestampsById.clear();
+		this.pruneStateById.clear();
 		this.leafId = null;
 		for (const entry of this.fileEntries) {
 			if (entry.type === "session") continue;
@@ -972,6 +1008,13 @@ export class SessionManager {
 				} else {
 					this.labelsById.delete(entry.targetId);
 					this.labelTimestampsById.delete(entry.targetId);
+				}
+			} else if (entry.type === "prune") {
+				// "included" (unprune) restores the default; store only non-default states.
+				if (entry.state === "included") {
+					this.pruneStateById.delete(entry.targetId);
+				} else {
+					this.pruneStateById.set(entry.targetId, entry.state);
 				}
 			}
 		}
@@ -1226,6 +1269,14 @@ export class SessionManager {
 	}
 
 	/**
+	 * Get the current prune state for an entry, if it has a non-default state.
+	 * Returns undefined when not pruned (default "included").
+	 */
+	getPruneState(id: string): PruneState | undefined {
+		return this.pruneStateById.get(id);
+	}
+
+	/**
 	 * Set or clear a label on an entry.
 	 * Labels are user-defined markers for bookmarking/navigation.
 	 * Pass undefined or empty string to clear the label.
@@ -1254,6 +1305,32 @@ export class SessionManager {
 	}
 
 	/**
+	 * Set or clear a prune marker on an entry.
+	 * "excluded" removes the entry from context; "included" restores it.
+	 * Global (not branch-scoped) — see PruneState.
+	 */
+	appendPruneChange(targetId: string, state: PruneState): string {
+		if (!this.byId.has(targetId)) {
+			throw new Error(`Entry ${targetId} not found`);
+		}
+		const entry: PruneEntry = {
+			type: "prune",
+			id: generateId(this.byId),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			targetId,
+			state,
+		};
+		this._appendEntry(entry);
+		if (state === "included") {
+			this.pruneStateById.delete(targetId);
+		} else {
+			this.pruneStateById.set(targetId, state);
+		}
+		return entry.id;
+	}
+
+	/**
 	 * Walk from entry to root, returning all entries in path order.
 	 * Includes all entry types (messages, compaction, model changes, etc.).
 	 * Use buildSessionContext() to get the resolved messages for the LLM.
@@ -1275,7 +1352,7 @@ export class SessionManager {
 	 * Uses tree traversal from current leaf.
 	 */
 	buildContextEntries(): SessionEntry[] {
-		return buildContextEntries(this.getEntries(), this.leafId, this.byId);
+		return buildContextEntries(this.getEntries(), this.leafId, this.byId, this.pruneStateById);
 	}
 
 	/**
@@ -1283,7 +1360,7 @@ export class SessionManager {
 	 * Uses tree traversal from current leaf.
 	 */
 	buildSessionContext(): SessionContext {
-		return buildSessionContext(this.getEntries(), this.leafId, this.byId);
+		return buildSessionContext(this.getEntries(), this.leafId, this.byId, this.pruneStateById);
 	}
 
 	/**
