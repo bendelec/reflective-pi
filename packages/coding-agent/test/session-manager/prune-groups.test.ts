@@ -149,6 +149,24 @@ describe("groupPruneBlocks", () => {
 		expect(block.entryIds).toEqual(["1", "2", "3"]);
 		expect(ids(block.entries)).toEqual(["1", "2", "3"]);
 	});
+
+	it("skips bookkeeping entries that do not contribute to context", () => {
+		const entries: SessionEntry[] = [
+			user("1", null, "hello"),
+			{ type: "label", id: "2", parentId: "1", timestamp: "2025-01-01T00:00:00Z", targetId: "1", label: "x" },
+			{
+				type: "thinking_level_change",
+				id: "3",
+				parentId: "2",
+				timestamp: "2025-01-01T00:00:00Z",
+				thinkingLevel: "high",
+			},
+			{ type: "prune", id: "4", parentId: "3", timestamp: "2025-01-01T00:00:00Z", targetId: "1", state: "excluded" },
+			assistant("5", "4", "hi"),
+		];
+
+		expect(groupPruneBlocks(entries).map((b) => b.entryIds)).toEqual([["1"], ["5"]]);
+	});
 });
 
 describe("previewBlock", () => {

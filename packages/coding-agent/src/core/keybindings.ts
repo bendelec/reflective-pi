@@ -54,6 +54,8 @@ export interface AppKeybindings {
 	"app.tree.filter.all": true;
 	"app.tree.filter.cycleForward": true;
 	"app.tree.filter.cycleBackward": true;
+	"app.prune.toggleAll": true;
+	"app.prune.toggle": true;
 }
 
 export type AppKeybinding = keyof AppKeybindings;
@@ -204,6 +206,14 @@ export const KEYBINDINGS = {
 	"app.tree.filter.cycleBackward": {
 		defaultKeys: "shift+ctrl+o",
 		description: "Tree filter: cycle backward",
+	},
+	"app.prune.toggleAll": {
+		defaultKeys: "ctrl+a",
+		description: "Prune selector: toggle show-all",
+	},
+	"app.prune.toggle": {
+		defaultKeys: "space",
+		description: "Prune selector: toggle selected block",
 	},
 } as const satisfies KeybindingDefinitions;
 

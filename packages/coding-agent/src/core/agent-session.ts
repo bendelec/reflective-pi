@@ -106,7 +106,13 @@ import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
-import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
+import type {
+	BranchSummaryEntry,
+	CompactionEntry,
+	PruneState,
+	SessionEntry,
+	SessionManager,
+} from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
@@ -1925,6 +1931,20 @@ export class AgentSession {
 	setFollowUpMode(mode: "all" | "one-at-a-time"): void {
 		this.agent.followUpMode = mode;
 		this.settingsManager.setFollowUpMode(mode);
+	}
+
+	/**
+	 * Set the prune state for one or more entries and recompute the live context.
+	 *
+	 * Pruning is reversible and does not re-render the chat history: pruned
+	 * messages remain visible in the rendered transcript but are excluded from
+	 * the context sent to the model on subsequent turns.
+	 */
+	setPruneState(entryIds: readonly string[], state: PruneState): void {
+		for (const entryId of entryIds) {
+			this.sessionManager.appendPruneChange(entryId, state);
+		}
+		this.agent.state.messages = this.sessionManager.buildSessionContext().messages;
 	}
 
 	// =========================================================================

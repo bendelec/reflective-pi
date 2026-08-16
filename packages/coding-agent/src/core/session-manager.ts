@@ -1356,6 +1356,15 @@ export class SessionManager {
 	}
 
 	/**
+	 * Compaction-truncated context entries, ignoring prune markers.
+	 * Used by the prune UI to show pruned entries alongside included ones so they
+	 * can be restored.
+	 */
+	buildContextEntriesAll(): SessionEntry[] {
+		return buildContextEntries(this.getEntries(), this.leafId, this.byId);
+	}
+
+	/**
 	 * Build the session context (what gets sent to the LLM).
 	 * Uses tree traversal from current leaf.
 	 */

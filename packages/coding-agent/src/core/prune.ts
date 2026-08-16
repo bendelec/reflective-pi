@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { contentText, type ToolResultMessage } from "@earendil-works/pi-ai";
-import type { SessionEntry } from "./session-manager.ts";
+import { type SessionEntry, sessionEntryToContextMessages } from "./session-manager.ts";
 
 /** An atomic block of entries that must be pruned together. */
 export interface PruneBlock {
@@ -40,6 +40,11 @@ export function groupPruneBlocks(entries: readonly SessionEntry[]): PruneBlock[]
 	const blocks: PruneBlock[] = [];
 
 	for (const entry of entries) {
+		// Skip entries that do not contribute to context (bookkeeping/state).
+		if (sessionEntryToContextMessages(entry).length === 0) {
+			continue;
+		}
+
 		const last = blocks[blocks.length - 1];
 		if (
 			entry.type === "message" &&

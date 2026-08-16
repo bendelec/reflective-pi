@@ -91,6 +91,7 @@ import {
 } from "../../core/model-resolver.ts";
 import { CredentialSynchronizationError } from "../../core/model-runtime.ts";
 import { DefaultPackageManager } from "../../core/package-manager.ts";
+import { groupPruneBlocks } from "../../core/prune.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
@@ -137,6 +138,7 @@ import {
 	formatAuthSelectorProviderType,
 	OAuthSelectorComponent,
 } from "./components/oauth-selector.ts";
+import { PruneSelectorComponent } from "./components/prune-selector.ts";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.ts";
 import { SessionSelectorComponent } from "./components/session-selector.ts";
 import { SettingsSelectorComponent } from "./components/settings-selector.ts";
@@ -3034,6 +3036,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/prune") {
+				this.showPruneSelector();
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/trust") {
 				this.showTrustSelector();
 				this.editor.setText("");
@@ -5172,6 +5179,35 @@ export class InteractiveMode {
 		} catch (error: unknown) {
 			this.showError(error instanceof Error ? error.message : String(error));
 		}
+	}
+
+	private showPruneSelector(): void {
+		const blocks = groupPruneBlocks(this.sessionManager.buildContextEntriesAll());
+
+		if (blocks.length === 0) {
+			this.showStatus("No messages to prune");
+			return;
+		}
+
+		this.showSelector((done) => {
+			const selector = new PruneSelectorComponent(
+				blocks,
+				(id) => this.sessionManager.getPruneState(id),
+				this.ui.terminal.rows,
+				(changes) => {
+					for (const change of changes) {
+						this.session.setPruneState(change.block.entryIds, change.state);
+					}
+					done();
+					this.ui.requestRender();
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+			);
+			return { component: selector, focus: selector };
+		});
 	}
 
 	private showTreeSelector(initialSelectedId?: string): void {
