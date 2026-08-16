@@ -426,6 +426,7 @@ ${chalk.bold("Built-in Tool Names:")}
   bash   - Execute bash commands
   edit   - Edit files with find/replace
   write  - Write files (creates/overwrites)
+  prune_context - Prune message groups from context to reduce size
   grep   - Search file contents (read-only, off by default)
   find   - Find files by glob pattern (read-only, off by default)
   ls     - List directory contents (read-only, off by default)

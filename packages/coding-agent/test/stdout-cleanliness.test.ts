@@ -95,6 +95,14 @@ describe("stdout cleanliness in non-interactive modes", () => {
 		expect(result.stderr).not.toContain("found 0 vulnerabilities");
 	});
 
+	it("lists prune_context in the built-in tool names section of --help", async () => {
+		const result = await runCli(["--help"]);
+
+		expect(result.code).toBe(0);
+		expect(result.stdout).toContain("Built-in Tool Names:");
+		expect(result.stdout).toContain("prune_context - Prune message groups from context to reduce size");
+	});
+
 	it("keeps stdout empty for --mode json --help while routing trusted startup chatter to stderr", async () => {
 		const result = await runCli(["--mode", "json", "--help", "--approve"]);
 
