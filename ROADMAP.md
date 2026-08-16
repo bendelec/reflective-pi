@@ -34,6 +34,13 @@ we're headed. Update as work lands.
 
 - **Prune UI/tool** — TUI tree view + agentic self-curation tool to add/remove
   prune markers (atomic groups selected together).
+- **Per-group token accounting** — attribute exact token counts to prune groups
+  from the server-reported context delta per assistant response, not content
+  heuristics (chars/4). Enables smarter prune decisions (group token cost shown
+  in the prune UI) and accurate compaction thresholds. Needs care around cache
+  accounting, compaction baseline resets, and tokenizer/model-family drift.
+  harness-v2's usage ledger (usage rows keyed to entries) already models this,
+  so it likely lands naturally on the harness-v2 migration.
 - **"summarized" prune state** — per-group mini-compaction: a cheap model
   summarizes a group, a summary card replaces the messages in context. The
   `PruneState` enum already anticipates this.
