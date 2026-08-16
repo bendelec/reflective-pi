@@ -7,6 +7,7 @@ import {
 	getSelfUpdateCommand,
 	getSelfUpdateUnavailableInstruction,
 	getUpdateInstruction,
+	resolveVersion,
 } from "../src/config.ts";
 
 const execPathDescriptor = Object.getOwnPropertyDescriptor(process, "execPath");
@@ -144,6 +145,21 @@ function createFakeBunScript(bunBin: string): string {
 	const escapedBunBin = bunBin.replaceAll("'", "'\\''");
 	return `#!/bin/sh\nif [ "$1" = "pm" ] && [ "$2" = "bin" ] && [ "$3" = "-g" ]; then\n\tprintf '%s\\n' '${escapedBunBin}'\n\texit 0\nfi\nexit 1\n`;
 }
+
+describe("resolveVersion", () => {
+	test("prefers the build-time binary version over the package version", () => {
+		expect(resolveVersion("0.84.2", "0.0.0")).toBe("0.84.2");
+		expect(resolveVersion("0.84.2", "0.84.2")).toBe("0.84.2");
+	});
+
+	test("falls back to the package version when no binary version is baked in", () => {
+		expect(resolveVersion(undefined, "0.84.2")).toBe("0.84.2");
+	});
+
+	test("falls back to 0.0.0 when neither version is available", () => {
+		expect(resolveVersion(undefined, undefined)).toBe("0.0.0");
+	});
+});
 
 describe("detectInstallMethod", () => {
 	test("detects pnpm from Windows .pnpm install paths", () => {

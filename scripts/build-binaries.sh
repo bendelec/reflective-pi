@@ -148,6 +148,11 @@ fi
 echo "==> Building binaries..."
 cd packages/coding-agent
 
+# Bake the package version into the binary so it reports its version even when
+# relocated without its package.json (see config.ts VERSION resolution).
+RXPI_BINARY_VERSION="$(node -p "require('./package.json').version")"
+export RXPI_BINARY_VERSION
+
 # Clean previous builds
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"/{darwin-arm64,darwin-x64,linux-x64,linux-arm64,windows-x64,windows-arm64}
@@ -173,9 +178,9 @@ for platform in "${PLATFORMS[@]}"; do
     # Disable cwd bunfig.toml autoload so project preload scripts cannot crash the
     # standalone binary before rxpi starts (see #7684).
     if [[ "$platform" == windows-* ]]; then
-        bun build --compile --no-compile-autoload-bunfig --target="$bun_target" ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile "$OUTPUT_DIR/$platform/rxpi.exe"
+        bun build --compile --no-compile-autoload-bunfig --env=RXPI_BINARY_* --target="$bun_target" ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile "$OUTPUT_DIR/$platform/rxpi.exe"
     else
-        bun build --compile --no-compile-autoload-bunfig --target="$bun_target" ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile "$OUTPUT_DIR/$platform/rxpi"
+        bun build --compile --no-compile-autoload-bunfig --env=RXPI_BINARY_* --target="$bun_target" ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile "$OUTPUT_DIR/$platform/rxpi"
     fi
 done
 

@@ -500,7 +500,24 @@ export const APP_NAME: string = piConfigName || "pi";
 export const BINARY_NAME: string = "rxpi";
 export const APP_TITLE: string = BINARY_NAME;
 export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
-export const VERSION: string = pkg.version || "0.0.0";
+
+/**
+ * Version baked into the compiled Bun binary at build time.
+ *
+ * scripts/build-binaries.sh (and the build:binary npm script) set RXPI_BINARY_VERSION
+ * to the package version and pass `--env=RXPI_BINARY_*` to `bun build --compile`,
+ * which inlines the value as a constant. This keeps version reporting self-contained
+ * and relocation-safe: a binary moved without its package.json still reports the
+ * version it was built with instead of falling back to "0.0.0".
+ */
+const BINARY_VERSION: string | undefined = isBunBinary ? process.env.RXPI_BINARY_VERSION : undefined;
+
+/** Resolve the reported version, preferring the build-time binary version. */
+export function resolveVersion(binaryVersion: string | undefined, packageVersion: string | undefined): string {
+	return binaryVersion || packageVersion || "0.0.0";
+}
+
+export const VERSION: string = resolveVersion(BINARY_VERSION, pkg.version);
 
 // e.g., PI_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
 export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
