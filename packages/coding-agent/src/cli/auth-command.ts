@@ -1,5 +1,5 @@
 import type { AuthResult } from "@earendil-works/pi-ai";
-import { APP_NAME } from "../config.ts";
+import { BINARY_NAME } from "../config.ts";
 import type { Args } from "./args.ts";
 
 export type AuthCommandKind = "check" | "api_key" | "bearer_token";
@@ -16,9 +16,9 @@ export interface AuthCommand {
 export class AuthCommandError extends Error {}
 
 const AUTH_COMMAND_USAGE: Record<AuthCommandKind, string> = {
-	check: `${APP_NAME} auth check --provider <provider> [--json] [--credentials] [--no-refresh]`,
-	api_key: `${APP_NAME} auth print-api-key --provider <provider> [--model <model>]`,
-	bearer_token: `${APP_NAME} auth print-bearer-token --provider <provider> [--model <model>] [--min-expiry <duration>]`,
+	check: `${BINARY_NAME} auth check --provider <provider> [--json] [--credentials] [--no-refresh]`,
+	api_key: `${BINARY_NAME} auth print-api-key --provider <provider> [--model <model>]`,
+	bearer_token: `${BINARY_NAME} auth print-bearer-token --provider <provider> [--model <model>] [--min-expiry <duration>]`,
 };
 
 export function getAuthCommandName(kind: AuthCommandKind): string {
@@ -58,7 +58,7 @@ export function parseAuthCommand(args: string[]): AuthCommand | undefined {
 					: undefined;
 	if (!kind) {
 		throw new AuthCommandError(
-			`Unknown auth command "${args[1] ?? ""}". Use "${APP_NAME} auth print-api-key", "${APP_NAME} auth print-bearer-token", or "${APP_NAME} auth check".`,
+			`Unknown auth command "${args[1] ?? ""}". Use "${BINARY_NAME} auth print-api-key", "${BINARY_NAME} auth print-bearer-token", or "${BINARY_NAME} auth check".`,
 		);
 	}
 

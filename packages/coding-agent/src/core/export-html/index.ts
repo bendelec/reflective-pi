@@ -1,7 +1,7 @@
 import type { AgentState } from "@earendil-works/pi-agent-core";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { basename, join } from "path";
-import { APP_NAME, getExportTemplateDir } from "../../config.ts";
+import { BINARY_NAME, getExportTemplateDir } from "../../config.ts";
 import { getResolvedThemeColors, getThemeExportColors } from "../../modes/interactive/theme/theme.ts";
 import { normalizePath, resolvePath } from "../../utils/paths.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
@@ -274,7 +274,7 @@ export async function exportSessionToHtml(
 	let outputPath = opts.outputPath ? normalizePath(opts.outputPath) : undefined;
 	if (!outputPath) {
 		const sessionBasename = basename(sessionFile, ".jsonl");
-		outputPath = `${APP_NAME}-session-${sessionBasename}.html`;
+		outputPath = `${BINARY_NAME}-session-${sessionBasename}.html`;
 	}
 
 	writeFileSync(outputPath, html, "utf8");
@@ -308,7 +308,7 @@ export async function exportFromFile(inputPath: string, options?: ExportOptions 
 	let outputPath = opts.outputPath ? normalizePath(opts.outputPath) : undefined;
 	if (!outputPath) {
 		const inputBasename = basename(resolvedInputPath, ".jsonl");
-		outputPath = `${APP_NAME}-session-${inputBasename}.html`;
+		outputPath = `${BINARY_NAME}-session-${inputBasename}.html`;
 	}
 
 	writeFileSync(outputPath, html, "utf8");

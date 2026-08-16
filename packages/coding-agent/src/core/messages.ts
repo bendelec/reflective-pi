@@ -66,6 +66,22 @@ export interface CompactionSummaryMessage {
 	timestamp: number;
 }
 
+/**
+ * System-generated context status note injected between turns.
+ *
+ * Sent to the model as a user message and persisted to the transcript like any
+ * normal message. Only the most recent one is authoritative; earlier ones are
+ * superseded by the newest (see the system prompt).
+ */
+export interface ContextStatusMessage {
+	role: "contextStatus";
+	/** Single-line text sent to the model and shown in the TUI. */
+	content: string;
+	/** Context usage percentage (0-100), used to pick the TUI highlight color. */
+	percent: number;
+	timestamp: number;
+}
+
 // Extend CustomAgentMessages via declaration merging
 declare module "@earendil-works/pi-agent-core" {
 	interface CustomAgentMessages {
@@ -73,6 +89,7 @@ declare module "@earendil-works/pi-agent-core" {
 		custom: CustomMessage;
 		branchSummary: BranchSummaryMessage;
 		compactionSummary: CompactionSummaryMessage;
+		contextStatus: ContextStatusMessage;
 	}
 }
 
@@ -137,6 +154,27 @@ export function createCustomMessage(
 	};
 }
 
+export const CONTEXT_STATUS_TAG = "[context-status]";
+
+/** Format a context status line: `[context-status] window 128,000 · used 45,230 (35.3%)`. */
+export function formatContextStatus(contextWindow: number, used: number, percent: number): string {
+	return `${CONTEXT_STATUS_TAG} window ${contextWindow.toLocaleString("en-US")} · used ${used.toLocaleString("en-US")} (${percent.toFixed(1)}%)`;
+}
+
+export function createContextStatusMessage(
+	contextWindow: number,
+	used: number,
+	percent: number,
+	timestamp: number,
+): ContextStatusMessage {
+	return {
+		role: "contextStatus",
+		content: formatContextStatus(contextWindow, used, percent),
+		percent,
+		timestamp,
+	};
+}
+
 /**
  * Transform AgentMessages (including custom types) to LLM-compatible Messages.
  *
@@ -179,6 +217,12 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
 						content: [
 							{ type: "text" as const, text: COMPACTION_SUMMARY_PREFIX + m.summary + COMPACTION_SUMMARY_SUFFIX },
 						],
+						timestamp: m.timestamp,
+					};
+				case "contextStatus":
+					return {
+						role: "user",
+						content: [{ type: "text" as const, text: m.content }],
 						timestamp: m.timestamp,
 					};
 				case "user":

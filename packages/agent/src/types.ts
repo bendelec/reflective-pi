@@ -244,6 +244,23 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	getSteeringMessages?: () => Promise<AgentMessage[]>;
 
 	/**
+	 * Returns context-status messages to inject before the next assistant response.
+	 *
+	 * Called at the same point as `getSteeringMessages` (after each turn, before the next
+	 * LLM call). Returned messages are injected as normal messages: emitted as
+	 * `message_start`/`message_end` (so they persist to the transcript) and appended to the
+	 * context sent to the server. Unlike steering, these are system-generated status notes,
+	 * not user input.
+	 *
+	 * The `context.toolResults` are the tool results from the turn that just finished. An
+	 * empty list means the agent just produced a terminal response (no more tool work), so
+	 * injecting a status note would force an extra turn; callers should return [] in that case.
+	 *
+	 * Contract: must not throw or reject. Return [] when no status message is needed.
+	 */
+	getContextStatusMessages?: (context: ShouldStopAfterTurnContext) => Promise<AgentMessage[]>;
+
+	/**
 	 * Returns follow-up messages to process after the agent would otherwise stop.
 	 *
 	 * Called when the agent has no more tool calls and no steering messages.

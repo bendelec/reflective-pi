@@ -113,6 +113,7 @@ export interface AgentOptions {
 		context: PrepareNextTurnContext,
 		signal?: AbortSignal,
 	) => Promise<AgentLoopTurnUpdate | undefined> | AgentLoopTurnUpdate | undefined;
+	getContextStatusMessages?: (context: ShouldStopAfterTurnContext) => Promise<AgentMessage[]>;
 	steeringMode?: QueueMode;
 	followUpMode?: QueueMode;
 	sessionId?: string;
@@ -201,6 +202,7 @@ export class Agent {
 		context: PrepareNextTurnContext,
 		signal?: AbortSignal,
 	) => Promise<AgentLoopTurnUpdate | undefined> | AgentLoopTurnUpdate | undefined;
+	public getContextStatusMessages?: (context: ShouldStopAfterTurnContext) => Promise<AgentMessage[]>;
 	private activeRun?: ActiveRun;
 	/** Session identifier forwarded to providers for cache-aware backends. */
 	public sessionId?: string;
@@ -228,6 +230,7 @@ export class Agent {
 		this.shouldStopAfterTurn = runtimeOptions.shouldStopAfterTurn;
 		this.prepareNextTurn = runtimeOptions.prepareNextTurn;
 		this.prepareNextTurnWithContext = runtimeOptions.prepareNextTurnWithContext;
+		this.getContextStatusMessages = runtimeOptions.getContextStatusMessages;
 		this.steeringQueue = new PendingMessageQueue(runtimeOptions.steeringMode ?? "one-at-a-time");
 		this.followUpQueue = new PendingMessageQueue(runtimeOptions.followUpMode ?? "one-at-a-time");
 		this.sessionId = runtimeOptions.sessionId;
@@ -479,6 +482,7 @@ export class Agent {
 				}
 				return this.steeringQueue.drain();
 			},
+			getContextStatusMessages: this.getContextStatusMessages,
 			getFollowUpMessages: async () => this.followUpQueue.drain(),
 		};
 	}

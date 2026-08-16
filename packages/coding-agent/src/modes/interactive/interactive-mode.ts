@@ -46,8 +46,8 @@ import {
 import chalk from "chalk";
 import { spawn, spawnSync } from "child_process";
 import {
-	APP_NAME,
 	APP_TITLE,
+	BINARY_NAME,
 	CONFIG_DIR_NAME,
 	getAgentDir,
 	getAuthPath,
@@ -117,6 +117,7 @@ import { BashExecutionComponent } from "./components/bash-execution.ts";
 import { BorderedLoader } from "./components/bordered-loader.ts";
 import { BranchSummaryMessageComponent } from "./components/branch-summary-message.ts";
 import { CompactionSummaryMessageComponent } from "./components/compaction-summary-message.ts";
+import { ContextStatusMessageComponent } from "./components/context-status-message.ts";
 import { CustomEditor } from "./components/custom-editor.ts";
 import { CustomEntryComponent } from "./components/custom-entry.ts";
 import { CustomMessageComponent } from "./components/custom-message.ts";
@@ -258,7 +259,7 @@ export function formatResumeCommand(sessionManager: SessionManager): string | un
 	const sessionFile = sessionManager.getSessionFile();
 	if (!sessionFile || !fs.existsSync(sessionFile)) return undefined;
 
-	const args = [APP_NAME];
+	const args = [BINARY_NAME];
 	if (!sessionManager.usesDefaultSessionDir()) {
 		args.push("--session-dir", quoteIfNeeded(sessionManager.getSessionDir()));
 	}
@@ -955,7 +956,7 @@ export class InteractiveMode {
 
 		// Add header with keybindings from config (unless silenced)
 		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
-			const logo = theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` v${this.version}`);
+			const logo = theme.bold(theme.fg("accent", BINARY_NAME)) + theme.fg("dim", ` v${this.version}`);
 
 			// Build startup instructions using keybinding hint helpers
 			const hint = (keybinding: AppKeybinding, description: string) => keyHint(keybinding, description);
@@ -3208,7 +3209,10 @@ export class InteractiveMode {
 				break;
 
 			case "message_start":
-				if (event.message.role === "custom") {
+				if (event.message.role === "contextStatus") {
+					this.addMessageToChat(event.message);
+					this.ui.requestRender();
+				} else if (event.message.role === "custom") {
 					this.addMessageToChat(event.message);
 					this.ui.requestRender();
 				} else if (event.message.role === "user") {
@@ -3609,6 +3613,12 @@ export class InteractiveMode {
 				this.chatContainer.addChild(component);
 				break;
 			}
+			case "contextStatus": {
+				this.chatContainer.addChild(new Spacer(1));
+				const component = new ContextStatusMessageComponent(message);
+				this.chatContainer.addChild(component);
+				break;
+			}
 			case "user": {
 				const textContent = this.getUserMessageText(message);
 				if (textContent) {
@@ -3987,7 +3997,7 @@ export class InteractiveMode {
 		try {
 			this.ui.stop();
 		} catch {}
-		console.error(`${APP_NAME} exiting due to uncaughtException:`);
+		console.error(`${BINARY_NAME} exiting due to uncaughtException:`);
 		console.error(error);
 		process.exit(1);
 	}
@@ -4245,7 +4255,7 @@ export class InteractiveMode {
 	}
 
 	showNewVersionNotification(release: LatestPiRelease): void {
-		const action = theme.fg("accent", `${APP_NAME} update`);
+		const action = theme.fg("accent", `${BINARY_NAME} update`);
 		const updateInstruction = theme.fg("muted", `New version ${release.version} is available. Run `) + action;
 		const changelogUrl = "https://pi.dev/changelog";
 		const changelogLink = getCapabilities().hyperlinks
@@ -4274,7 +4284,7 @@ export class InteractiveMode {
 	}
 
 	showPackageUpdateNotification(packages: string[]): void {
-		const action = theme.fg("accent", `${APP_NAME} update --extensions`);
+		const action = theme.fg("accent", `${BINARY_NAME} update --extensions`);
 		const updateInstruction = theme.fg("muted", "Package updates are available. Run ") + action;
 		const packageLines = packages.map((pkg) => `- ${pkg}`).join("\n");
 
@@ -4935,7 +4945,7 @@ export class InteractiveMode {
 					trustStore.setMany(selection.updates);
 					done();
 					this.showStatus(
-						`Saved trust decision: ${selection.trusted ? "trusted" : "untrusted"}. Restart ${APP_NAME} for this to take effect.`,
+						`Saved trust decision: ${selection.trusted ? "trusted" : "untrusted"}. Restart ${BINARY_NAME} for this to take effect.`,
 					);
 				},
 				onCancel: () => {
@@ -5721,7 +5731,7 @@ export class InteractiveMode {
 			`${providerOption.name} setup`,
 		);
 		dialog.showInfo(
-			`${providerOption.method?.name ?? "Authentication"} is configured outside ${APP_NAME}.`,
+			`${providerOption.method?.name ?? "Authentication"} is configured outside ${BINARY_NAME}.`,
 			[],
 			true,
 		);

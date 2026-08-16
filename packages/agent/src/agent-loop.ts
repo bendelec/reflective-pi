@@ -256,7 +256,9 @@ async function runLoop(
 				return;
 			}
 
-			pendingMessages = (await config.getSteeringMessages?.()) || [];
+			const steering = (await config.getSteeringMessages?.()) || [];
+			const contextStatus = (await config.getContextStatusMessages?.(nextTurnContext)) || [];
+			pendingMessages = [...steering, ...contextStatus];
 		}
 
 		// Agent would stop here. Check for follow-up messages.

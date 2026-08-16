@@ -488,7 +488,17 @@ try {
 const piConfigName: string | undefined = pkg.piConfig?.name;
 export const PACKAGE_NAME: string = pkg.name || "@earendil-works/pi-coding-agent";
 export const APP_NAME: string = piConfigName || "pi";
-export const APP_TITLE: string = piConfigName ? APP_NAME : "π";
+
+/**
+ * Executable/command name shown to users (process title, usage strings, window title).
+ *
+ * Deliberately decoupled from `APP_NAME`: `APP_NAME` drives the `PI_*` environment
+ * variables (e.g. `PI_CODING_AGENT_DIR`) that extensions and the existing pi install
+ * rely on, so it must stay "pi" to keep a single shared `.pi` directory and a stable
+ * extension interface. The binary, by contrast, is renamed `rxpi` for this fork.
+ */
+export const BINARY_NAME: string = "rxpi";
+export const APP_TITLE: string = BINARY_NAME;
 export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
 export const VERSION: string = pkg.version || "0.0.0";
 
@@ -563,5 +573,5 @@ export function getSessionsDir(): string {
 
 /** Get path to debug log file */
 export function getDebugLogPath(): string {
-	return join(getAgentDir(), `${APP_NAME}-debug.log`);
+	return join(getAgentDir(), `${BINARY_NAME}-debug.log`);
 }

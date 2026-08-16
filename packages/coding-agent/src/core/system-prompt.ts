@@ -40,6 +40,11 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	const appendSection = appendSystemPrompt ? `\n\n${appendSystemPrompt}` : "";
 
+	// Injected between turns (and into context) so the model knows where it stands.
+	// Kept separate from appendSystemPrompt so it is always present, even with a custom prompt.
+	const contextStatusNote =
+		"\n\nNote: the harness may inject short `[context-status]` messages between turns (e.g. `[context-status] window 128,000 · used 45,230 (35.3%)`) reporting your context window size and current usage. Only the most recent such message is valid; any earlier ones are stale and superseded by the newest one.\n";
+
 	const contextFiles = providedContextFiles ?? [];
 	const skills = providedSkills ?? [];
 
@@ -66,6 +71,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 			prompt += formatSkillsForPrompt(skills);
 		}
 
+		prompt += contextStatusNote;
 		prompt += `\nCurrent working directory: ${promptCwd}\n`;
 
 		return prompt;
@@ -156,6 +162,7 @@ Pi documentation (read only when the user asks about pi itself, its SDK, extensi
 		prompt += formatSkillsForPrompt(skills);
 	}
 
+	prompt += contextStatusNote;
 	prompt += `\nCurrent working directory: ${promptCwd}`;
 
 	return prompt;

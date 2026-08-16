@@ -96,7 +96,7 @@ Then just talk to pi. By default, pi gives the model four tools: `read`, `write`
 
 ## Providers & Models
 
-For each built-in provider, pi maintains a list of tool-capable models. Configured provider catalogs refresh automatically; run `pi update --models` to force an immediate refresh. Authenticate via subscription (`/login`) or API key, then select any model from that provider via `/model` (or Ctrl+L).
+For each built-in provider, pi maintains a list of tool-capable models. Configured provider catalogs refresh automatically; run `rxpi update --models` to force an immediate refresh. Authenticate via subscription (`/login`) or API key, then select any model from that provider via `/model` (or Ctrl+L).
 
 **Subscriptions:**
 - Anthropic Claude Pro/Max
@@ -242,12 +242,12 @@ Sessions are stored as JSONL files with a tree structure. Each entry has an `id`
 Sessions auto-save to `~/.pi/agent/sessions/` organized by working directory.
 
 ```bash
-pi -c                  # Continue most recent session
-pi -r                  # Browse and select from past sessions
-pi --no-session        # Ephemeral mode (don't save)
-pi --name "my task"    # Set session display name at startup
-pi --session <path|id> # Use specific session file or ID
-pi --fork <path|id>    # Fork specific session file or ID into a new session
+rxpi -c                  # Continue most recent session
+rxpi -r                  # Browse and select from past sessions
+rxpi --no-session        # Ephemeral mode (don't save)
+rxpi --name "my task"    # Set session display name at startup
+rxpi --session <path|id> # Use specific session file or ID
+rxpi --fork <path|id>    # Fork specific session file or ID into a new session
 ```
 
 Use `/session` in interactive mode to see the current session ID before reusing it with `--session <id>` or `--fork <id>`.
@@ -302,7 +302,7 @@ Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trus
 
 If no extension or saved decision applies, `defaultProjectTrust` controls the fallback behavior. Set it to `"ask"`, `"always"`, or `"never"` in `~/.pi/agent/settings.json`, or change it with `/settings`.
 
-`pi config` and package commands use the same project trust flow, except `pi update` never prompts. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
+`rxpi config` and package commands use the same project trust flow, except `rxpi update` never prompts. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
 
 Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.pi/agent/trust.json` only; the current session is not reloaded, so restart pi for changes to take effect.
 
@@ -411,30 +411,30 @@ Bundle and share extensions, skills, prompts, and themes via npm or git. Find pa
 > **Security:** Pi packages run with full system access. Extensions execute arbitrary code, and skills can instruct the model to perform any action including running executables. Review source code before installing third-party packages.
 
 ```bash
-pi install npm:@foo/pi-tools
-pi install npm:@foo/pi-tools@1.2.3      # pinned version
-pi install git:github.com/user/repo
-pi install git:github.com/user/repo@v1  # tag or commit
-pi install git:git@github.com:user/repo
-pi install git:git@github.com:user/repo@v1  # tag or commit
-pi install https://github.com/user/repo
-pi install https://github.com/user/repo@v1      # tag or commit
-pi install ssh://git@github.com/user/repo
-pi install ssh://git@github.com/user/repo@v1    # tag or commit
-pi remove npm:@foo/pi-tools
-pi uninstall npm:@foo/pi-tools          # alias for remove
-pi list
-pi update                               # update pi only
-pi update --all                         # update pi and packages
-pi update --extensions                  # update packages only
-pi update --models                      # refresh model catalogs only
-pi update --self                        # update pi only
-pi update --self --force                # reinstall pi even if current
-pi update npm:@foo/pi-tools             # update one package
-pi config                               # enable/disable extensions, skills, prompts, themes
+rxpi install npm:@foo/pi-tools
+rxpi install npm:@foo/pi-tools@1.2.3      # pinned version
+rxpi install git:github.com/user/repo
+rxpi install git:github.com/user/repo@v1  # tag or commit
+rxpi install git:git@github.com:user/repo
+rxpi install git:git@github.com:user/repo@v1  # tag or commit
+rxpi install https://github.com/user/repo
+rxpi install https://github.com/user/repo@v1      # tag or commit
+rxpi install ssh://git@github.com/user/repo
+rxpi install ssh://git@github.com/user/repo@v1    # tag or commit
+rxpi remove npm:@foo/pi-tools
+rxpi uninstall npm:@foo/pi-tools          # alias for remove
+rxpi list
+rxpi update                               # update rxpi only
+rxpi update --all                         # update rxpi and packages
+rxpi update --extensions                  # update packages only
+rxpi update --models                      # refresh model catalogs only
+rxpi update --self                        # update rxpi only
+rxpi update --self --force                # reinstall rxpi even if current
+rxpi update npm:@foo/pi-tools             # update one package
+rxpi config                               # enable/disable extensions, skills, prompts, themes
 ```
 
-Packages install to `~/.pi/agent/git/` (git) or `~/.pi/agent/npm/` (npm). Use `-l` for project-local installs (`.pi/git/`, `.pi/npm/`). Git `@ref` values are pinned tags or commits; pinned packages are skipped by `pi update --extensions` and `pi update --all`, so use `pi install git:host/user/repo@new-ref` to move an existing package to a new ref. Git packages install dependencies with `npm install --omit=dev` by default, so runtime deps must be listed under `dependencies`; when `npmCommand` is configured, git packages use plain `install` for compatibility with wrappers. If you use a Node version manager and want package installs to reuse a stable npm context, set `npmCommand` in `settings.json`, for example `["mise", "exec", "node@20", "--", "npm"]`.
+Packages install to `~/.pi/agent/git/` (git) or `~/.pi/agent/npm/` (npm). Use `-l` for project-local installs (`.pi/git/`, `.pi/npm/`). Git `@ref` values are pinned tags or commits; pinned packages are skipped by `rxpi update --extensions` and `rxpi update --all`, so use `rxpi install git:host/user/repo@new-ref` to move an existing package to a new ref. Git packages install dependencies with `npm install --omit=dev` by default, so runtime deps must be listed under `dependencies`; when `npmCommand` is configured, git packages use plain `install` for compatibility with wrappers. If you use a Node version manager and want package installs to reuse a stable npm context, set `npmCommand` in `settings.json`, for example `["mise", "exec", "node@20", "--", "npm"]`.
 
 Create a package by adding a `pi` key to `package.json`:
 
@@ -482,7 +482,7 @@ See [docs/sdk.md](docs/sdk.md) and [examples/sdk/](examples/sdk/).
 For non-Node.js integrations, use RPC mode over stdin/stdout:
 
 ```bash
-pi --mode rpc
+rxpi --mode rpc
 ```
 
 RPC mode uses strict LF-delimited JSONL framing. Clients must split records on `\n` only. Do not use generic line readers like Node `readline`, which also split on Unicode separators inside JSON payloads.
@@ -514,27 +514,27 @@ Read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/) 
 ## CLI Reference
 
 ```bash
-pi [options] [@files...] [messages...]
+rxpi [options] [@files...] [messages...]
 ```
 
 ### Package Commands
 
 ```bash
-pi install <source> [-l]     # Install package, -l for project-local
-pi remove <source> [-l]      # Remove package
-pi uninstall <source> [-l]   # Alias for remove
-pi update [source|self|pi]   # Update pi only, or one package source
-pi update --all              # Update pi and packages
-pi update --extensions       # Update packages only
-pi update --models           # Refresh model catalogs only
-pi update --self             # Update pi only
-pi update --self --force     # Reinstall pi even if current
-pi update --extension <src>  # Update one package
-pi list                      # List installed packages
-pi config                    # Enable/disable package resources
+rxpi install <source> [-l]     # Install package, -l for project-local
+rxpi remove <source> [-l]      # Remove package
+rxpi uninstall <source> [-l]   # Alias for remove
+rxpi update [source|self|rxpi]   # Update rxpi only, or one package source
+rxpi update --all              # Update rxpi and packages
+rxpi update --extensions       # Update packages only
+rxpi update --models           # Refresh model catalogs only
+rxpi update --self             # Update rxpi only
+rxpi update --self --force     # Reinstall rxpi even if current
+rxpi update --extension <src>  # Update one package
+rxpi list                      # List installed packages
+rxpi config                    # Enable/disable package resources
 ```
 
-`pi config` and project package commands accept `--approve`/`--no-approve` to trust or ignore project-local settings for one command. `pi update` never prompts for project trust.
+`rxpi config` and project package commands accept `--approve`/`--no-approve` to trust or ignore project-local settings for one command. `rxpi update` never prompts for project trust.
 
 ### Modes
 
@@ -549,7 +549,7 @@ pi config                    # Enable/disable package resources
 In print mode, pi also reads piped stdin and merges it into the initial prompt:
 
 ```bash
-cat README.md | pi -p "Summarize this text"
+cat README.md | rxpi -p "Summarize this text"
 ```
 
 ### Model Options
@@ -621,46 +621,46 @@ Combine `--no-*` with explicit flags to load exactly what you need, ignoring set
 Prefix files with `@` to include in the message:
 
 ```bash
-pi @prompt.md "Answer this"
-pi -p @screenshot.png "What's in this image?"
-pi @code.ts @test.ts "Review these files"
+rxpi @prompt.md "Answer this"
+rxpi -p @screenshot.png "What's in this image?"
+rxpi @code.ts @test.ts "Review these files"
 ```
 
 ### Examples
 
 ```bash
 # Interactive with initial prompt
-pi "List all .ts files in src/"
+rxpi "List all .ts files in src/"
 
 # Non-interactive
-pi -p "Summarize this codebase"
+rxpi -p "Summarize this codebase"
 
 # Non-interactive with piped stdin
-cat README.md | pi -p "Summarize this text"
+cat README.md | rxpi -p "Summarize this text"
 
 # Named one-shot session
-pi --name "release audit" -p "Audit this repository"
+rxpi --name "release audit" -p "Audit this repository"
 
 # Different model
-pi --provider openai --model gpt-4o "Help me refactor"
+rxpi --provider openai --model gpt-4o "Help me refactor"
 
 # Model with provider prefix (no --provider needed)
-pi --model openai/gpt-4o "Help me refactor"
+rxpi --model openai/gpt-4o "Help me refactor"
 
 # Model with thinking level shorthand
-pi --model sonnet:high "Solve this complex problem"
+rxpi --model sonnet:high "Solve this complex problem"
 
 # Limit model cycling
-pi --models "claude-*,gpt-4o"
+rxpi --models "claude-*,gpt-4o"
 
 # Read-only mode
-pi --tools read,grep,find,ls -p "Review the code"
+rxpi --tools read,grep,find,ls -p "Review the code"
 
 # Disable one extension or built-in tool while keeping the rest available
-pi --exclude-tools ask_question
+rxpi --exclude-tools ask_question
 
 # High thinking level
-pi --thinking high "Solve this complex problem"
+rxpi --thinking high "Solve this complex problem"
 ```
 
 ### Environment Variables

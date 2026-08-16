@@ -17,10 +17,11 @@ import { readdir, stat } from "fs/promises";
 import { join, resolve } from "path";
 import { createInterface } from "readline";
 import { StringDecoder } from "string_decoder";
-import { APP_NAME, getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
+import { BINARY_NAME, getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import {
 	type BashExecutionMessage,
+	type ContextStatusMessage,
 	type CustomMessage,
 	createBranchSummaryMessage,
 	createCompactionSummaryMessage,
@@ -902,7 +903,7 @@ export class SessionManager {
 			if (this.fileEntries.length === 0) {
 				const explicitPath = this.sessionFile;
 				if (statSync(explicitPath).size > 0) {
-					throw new Error(`Session file is not a valid ${APP_NAME} session: ${explicitPath}`);
+					throw new Error(`Session file is not a valid ${BINARY_NAME} session: ${explicitPath}`);
 				}
 				this.newSession();
 				this.sessionFile = explicitPath;
@@ -1054,7 +1055,7 @@ export class SessionManager {
 	 * so it is easier to find them.
 	 * These need to be appended via appendCompaction() and appendBranchSummary() methods.
 	 */
-	appendMessage(message: Message | CustomMessage | BashExecutionMessage): string {
+	appendMessage(message: Message | CustomMessage | BashExecutionMessage | ContextStatusMessage): string {
 		const entry: SessionMessageEntry = {
 			type: "message",
 			id: generateId(this.byId),

@@ -4,7 +4,7 @@ import { arch, platform } from "os";
 import { join } from "path";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
-import { APP_NAME, getBinDir } from "../config.ts";
+import { BINARY_NAME, getBinDir } from "../config.ts";
 import { fetchWithRetry } from "./management-http.ts";
 
 const TOOLS_DIR = getBinDir();
@@ -108,7 +108,7 @@ async function getLatestVersion(repo: string): Promise<string> {
 	const response = await fetchWithRetry(
 		`https://api.github.com/repos/${repo}/releases/latest`,
 		{
-			headers: { "User-Agent": `${APP_NAME}-coding-agent` },
+			headers: { "User-Agent": `${BINARY_NAME}-coding-agent` },
 		},
 		{ timeoutMs: NETWORK_TIMEOUT_MS },
 	);

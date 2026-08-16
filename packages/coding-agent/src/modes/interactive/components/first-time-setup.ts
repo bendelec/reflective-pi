@@ -1,5 +1,5 @@
 import { Container, getKeybindings, Spacer, Text } from "@earendil-works/pi-tui";
-import { APP_NAME } from "../../../config.ts";
+import { BINARY_NAME } from "../../../config.ts";
 import { type TerminalTheme, theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint, rawKeyHint } from "./keybinding-hints.ts";
@@ -53,7 +53,7 @@ export class FirstTimeSetupComponent extends Container {
 		this.addChild(new Text(theme.fg("accent", SETUP_LOGO_LINES.join("\n")), 1, 0));
 		this.addChild(new Spacer(1));
 		this.addChild(
-			new Text(theme.fg("accent", theme.bold(`Welcome to ${APP_NAME}, the minimal coding agent.`)), 1, 0),
+			new Text(theme.fg("accent", theme.bold(`Welcome to ${BINARY_NAME}, the minimal coding agent.`)), 1, 0),
 		);
 		this.addChild(new Spacer(1));
 

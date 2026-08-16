@@ -784,6 +784,96 @@ describe("agentLoop with AgentMessage", () => {
 		expect(sawInterruptInContext).toBe(true);
 	});
 
+	it("should inject context-status messages returned by getContextStatusMessages", async () => {
+		const toolSchema = Type.Object({ value: Type.String() });
+		const tool: AgentTool<typeof toolSchema, { value: string }> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				return {
+					content: [{ type: "text", text: `ok:${params.value}` }],
+					details: { value: params.value },
+				};
+			},
+		};
+
+		const context: AgentContext = {
+			systemPrompt: "",
+			messages: [],
+			tools: [tool],
+		};
+
+		const userPrompt: AgentMessage = createUserMessage("start");
+		const statusMessage: AgentMessage = {
+			role: "user",
+			content: "[context-status] window 8192 · used 100 (1.2%)",
+			timestamp: Date.now(),
+		};
+
+		const receivedToolResultCounts: number[] = [];
+		let injected = false;
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			getContextStatusMessages: async (turnContext) => {
+				receivedToolResultCounts.push(turnContext.toolResults.length);
+				if (turnContext.toolResults.length > 0 && !injected) {
+					injected = true;
+					return [statusMessage];
+				}
+				return [];
+			},
+		};
+
+		let sawStatusInContext = false;
+		let callIndex = 0;
+		const stream = agentLoop([userPrompt], context, config, undefined, (_model, ctx, _options) => {
+			if (callIndex === 1) {
+				sawStatusInContext = ctx.messages.some(
+					(m) => m.role === "user" && typeof m.content === "string" && m.content.includes("[context-status]"),
+				);
+			}
+			const mockStream = new MockAssistantStream();
+			queueMicrotask(() => {
+				if (callIndex === 0) {
+					const message = createAssistantMessage(
+						[{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "hello" } }],
+						"toolUse",
+					);
+					mockStream.push({ type: "done", reason: "toolUse", message });
+				} else {
+					const message = createAssistantMessage([{ type: "text", text: "done" }]);
+					mockStream.push({ type: "done", reason: "stop", message });
+				}
+				callIndex++;
+			});
+			return mockStream;
+		});
+
+		const events: AgentEvent[] = [];
+		for await (const event of stream) {
+			events.push(event);
+		}
+
+		const messages = await stream.result();
+
+		// The hook received the turn context on every turn: one tool result on the
+		// first turn and zero on the terminal turn.
+		expect(receivedToolResultCounts).toContain(1);
+		expect(receivedToolResultCounts).toContain(0);
+		expect(injected).toBe(true);
+
+		// The status message was emitted as a normal message and included in context.
+		expect(sawStatusInContext).toBe(true);
+		const statusInMessages = messages.some(
+			(m) => m.role === "user" && typeof m.content === "string" && m.content.includes("[context-status]"),
+		);
+		expect(statusInMessages).toBe(true);
+		expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "toolResult", "user", "assistant"]);
+	});
+
 	it("should force sequential execution when a tool has executionMode=sequential even with default parallel config", async () => {
 		const toolSchema = Type.Object({ value: Type.String() });
 		let firstResolved = false;

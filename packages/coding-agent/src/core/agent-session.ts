@@ -96,7 +96,12 @@ import {
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
-import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
+import {
+	type BashExecutionMessage,
+	type ContextStatusMessage,
+	type CustomMessage,
+	createContextStatusMessage,
+} from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
@@ -348,6 +353,10 @@ export class AgentSession {
 	private _extensionRunner!: ExtensionRunner;
 	private _turnIndex = 0;
 
+	// Context status tracking (system-injected `contextStatus` messages)
+	private _contextStatusLastPercent: number | null = null;
+	private _contextStatusTurnStartPercent: number | null = null;
+
 	private _resourceLoader: ResourceLoader;
 	private _customTools: ToolDefinition[];
 	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
@@ -400,6 +409,13 @@ export class AgentSession {
 		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
 		this._installAgentToolHooks();
 		this._installAgentNextTurnRefresh();
+		this._installContextStatusHook();
+
+		// Insert an initial context-status baseline when resuming a session with
+		// existing content. New sessions have an empty transcript and are skipped.
+		if (this.agent.state.messages.length > 0) {
+			this._insertContextStatusNow();
+		}
 
 		this._buildRuntime({
 			activeToolNames: this._initialActiveToolNames,
@@ -560,6 +576,96 @@ export class AgentSession {
 		};
 	}
 
+	/**
+	 * Install the context-status hook that injects system status messages between turns.
+	 *
+	 * The agent loop calls `getContextStatusMessages` after each turn, before its next LLM
+	 * request. Any returned message is injected as a normal message: emitted (so it persists)
+	 * and appended to the server context.
+	 */
+	private _installContextStatusHook(): void {
+		this.agent.getContextStatusMessages = async (context) => {
+			// Only inject when the turn just executed tool work. A terminal turn (no tool
+			// results) would otherwise be forced into an extra assistant response, which
+			// cascades into an infinite loop once context is >= 80%.
+			if (context.toolResults.length === 0) {
+				return [];
+			}
+			const message = this._maybeBuildContextStatusMessage();
+			return message ? [message] : [];
+		};
+	}
+
+	/**
+	 * Decide whether to emit a context-status message for the just-finished turn.
+	 *
+	 * Returns a message when (in order of precedence):
+	 * - context is at least 80% full (every turn),
+	 * - the percent crossed a 10% multiple since the last insert,
+	 * - the current turn grew context usage by more than 5 percentage points,
+	 * - no status has been inserted yet (establish a baseline).
+	 */
+	private _maybeBuildContextStatusMessage(): ContextStatusMessage | undefined {
+		const usage = this.getContextUsage();
+		if (!usage || usage.tokens === null || usage.percent === null || usage.contextWindow <= 0) {
+			return undefined;
+		}
+
+		const percent = usage.percent;
+		const tokens = usage.tokens;
+		const contextWindow = usage.contextWindow;
+		const last = this._contextStatusLastPercent;
+		const build = () => {
+			this._contextStatusLastPercent = percent;
+			return createContextStatusMessage(contextWindow, Math.round(tokens), percent, Date.now());
+		};
+
+		if (percent >= 80) {
+			return build();
+		}
+
+		if (last !== null && Math.floor(percent / 10) > Math.floor(last / 10)) {
+			return build();
+		}
+
+		const turnStart = this._contextStatusTurnStartPercent;
+		if (turnStart !== null && percent - turnStart > 5) {
+			return build();
+		}
+
+		// Establish a baseline on the first evaluation (fresh session or after resume).
+		if (last === null) {
+			return build();
+		}
+
+		return undefined;
+	}
+
+	/**
+	 * Force-insert a context-status message immediately (not via the turn hook).
+	 *
+	 * Used for trigger #1: session resume and tree navigation. Appends the message to the
+	 * in-memory transcript, persists it to the session file, and emits it so the TUI renders it.
+	 */
+	private _insertContextStatusNow(): void {
+		const usage = this.getContextUsage();
+		if (!usage || usage.tokens === null || usage.percent === null || usage.contextWindow <= 0) {
+			return;
+		}
+
+		const message = createContextStatusMessage(
+			usage.contextWindow,
+			Math.round(usage.tokens),
+			usage.percent,
+			Date.now(),
+		);
+		this._contextStatusLastPercent = usage.percent;
+		this.agent.state.messages.push(message);
+		this.sessionManager.appendMessage(message);
+		this._emit({ type: "message_start", message });
+		this._emit({ type: "message_end", message });
+	}
+
 	// =========================================================================
 	// Event Subscription
 	// =========================================================================
@@ -619,6 +725,11 @@ export class AgentSession {
 
 	/** Internal handler for agent events - shared by subscribe and reconnect */
 	private _handleAgentEvent = async (event: AgentEvent): Promise<void> => {
+		// Capture context usage at the start of each turn for delta-based triggering.
+		if (event.type === "turn_start") {
+			this._contextStatusTurnStartPercent = this.getContextUsage()?.percent ?? null;
+		}
+
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
@@ -661,7 +772,8 @@ export class AgentSession {
 			} else if (
 				event.message.role === "user" ||
 				event.message.role === "assistant" ||
-				event.message.role === "toolResult"
+				event.message.role === "toolResult" ||
+				event.message.role === "contextStatus"
 			) {
 				// Regular LLM message - persist as SessionMessageEntry
 				this.sessionManager.appendMessage(event.message);
@@ -1950,6 +2062,8 @@ export class AgentSession {
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
+			// Context shrunk after compaction; the old percent baseline is stale.
+			this._contextStatusLastPercent = null;
 			const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
 
 			// Get the saved compaction entry for the extension event
@@ -2275,6 +2389,8 @@ export class AgentSession {
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
+			// Context shrunk after compaction; the old percent baseline is stale.
+			this._contextStatusLastPercent = null;
 			const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
 
 			// Get the saved compaction entry for the extension event
@@ -3201,6 +3317,12 @@ export class AgentSession {
 			// Update agent state
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
+
+			// Establish a fresh context-status baseline after navigating the tree.
+			// The old percent is stale; insert unconditionally so the model and TUI
+			// see the status of the newly selected branch.
+			this._contextStatusLastPercent = null;
+			this._insertContextStatusNow();
 
 			// Emit session_tree event
 			await this._extensionRunner.emit({
