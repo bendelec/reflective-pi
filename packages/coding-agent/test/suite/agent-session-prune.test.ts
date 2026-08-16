@@ -110,6 +110,22 @@ describe("AgentSession setPruneState", () => {
 		const prompt = harness.session.systemPrompt;
 		expect(prompt).toContain("prune_context");
 		expect(prompt).toContain("valuable, limited resource");
+		// Reassurance that pruning is safe, so the model is willing to prune proactively.
+		expect(prompt).toContain("never deletes history");
+	});
+
+	it("spells out the list-then-prune workflow in the tool description", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		const description = harness.session.getToolDefinition("prune_context")?.description ?? "";
+		expect(description).toContain("list the current blocks");
+		expect(description).toContain("reversible");
+		expect(description).toContain("never deletes history");
+	});
+
+	it("ties the context-status signal to the prune action in the system prompt", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		const prompt = harness.session.systemPrompt;
+		expect(prompt).toMatch(/\[context-status\].*prune/);
 	});
 
 	it("returns error for malformed parameters", async () => {

@@ -43,7 +43,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	// Injected between turns (and into context) so the model knows where it stands.
 	// Kept separate from appendSystemPrompt so it is always present, even with a custom prompt.
 	const contextStatusNote =
-		"\n\nNote: the harness may inject short `[context-status]` messages between turns (e.g. `[context-status] window 128,000 · used 45,230 (35.3%)`) reporting your context window size and current usage. Only the most recent such message is valid; any earlier ones are stale and superseded by the newest one.\n";
+		"\n\nNote: the harness may inject short `[context-status]` messages between turns (e.g. `[context-status] window 128,000 · used 45,230 (35.3%)`) reporting your context window size and current usage. Only the most recent such message is valid; any earlier ones are stale and superseded by the newest one. Treat climbing usage (especially toward 80%) as a cue to prune stale context with the prune_context tool before continuing.\n";
 
 	const contextFiles = providedContextFiles ?? [];
 	const skills = providedSkills ?? [];

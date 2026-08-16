@@ -2858,10 +2858,12 @@ export class AgentSession {
 			name: "prune_context",
 			label: "Prune Context",
 			description:
-				'Prune (exclude) message groups from your context that are no longer needed, to keep your context small and focused. Call prune_context with no parameters to list the current blocks and their ids, then call it with the ids parameter containing an array of block ids to prune. Each block is pruned atomically (tool calls stay with their results). Pruning is reversible and does not delete history. Example: to list blocks, call prune_context with no parameters. To prune specific blocks, call prune_context with parameters: {"ids": ["id1", "id2"]}.',
+				'Prune (exclude) message blocks from your context that are no longer needed, to keep it small and focused. Call prune_context with no parameters to list the current blocks with their ids and one-line previews, then call prune_context with {"ids": ["id1", "id2"]} to prune the blocks you no longer need. Blocks are pruned atomically (a tool call and its results stay together). Pruning is reversible and never deletes history, so it is safe to prune aggressively.',
 			promptSnippet: "Prune stale messages from your context to keep it small and focused.",
 			promptGuidelines: [
-				"Treat your context window as a valuable, limited resource. Keep it clean proactively: prune messages that are stale or no longer needed, because a smaller, cleaner context without stale content usually translates directly into better results.",
+				"Treat your context window as a valuable, limited resource: a smaller, cleaner context without stale content usually translates directly into better results.",
+				"Prune proactively with prune_context: after finishing a task or subtask, before starting unrelated work, and whenever a `[context-status]` message shows usage climbing (especially toward 80%).",
+				"Prune stale blocks — old file reads, completed explorations, and superseded attempts — rather than keeping them around. Pruning is reversible and never deletes history, so it is safe to prune aggressively.",
 			],
 			parameters: schema,
 			execute: async (_toolCallId, params) => {
