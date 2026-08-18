@@ -8,11 +8,53 @@
   <a href="https://www.npmjs.com/package/@earendil-works/pi-coding-agent"><img alt="npm" src="https://img.shields.io/npm/v/@earendil-works/pi-coding-agent?style=flat-square" /></a>
 </p>
 
-> New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](CONTRIBUTING.md).
-
 # rxpi — reflective-pi
 
 **rxpi** is a focused fork of the Pi agent harness project, including our self extensible coding agent.
+
+## Reflective context management
+
+### Idea:
+
+This fork is intended as a proof of concept for the idea that modern models should be intelligent enough
+to be trusted with curating their own context effectively. Traditionally, compaction (summary) is 
+backward-looking, not forward-looking. It summarizes the work that was done in the past; it doesn't 
+select context based on what work is planned next and what value each piece of context has for that future work.
+
+In interactive sessions, you can often provide additional hints to the compaction prompt
+(e.g., /compact keep the research of the pathfinding architecture). But for long-running 
+agentic tasks where an agent follows its own plan and the harness causes auto-compaction when context 
+pressure reaches a certain point, there is currently little forward-looking optimization. Yet, 
+these long-running tasks actually possess the best prerequisites for proactive management: because 
+the model follows a structured plan, it knows exactly what work it will do next and precisely which 
+parts of its past context remain relevant to that future work.
+
+This PoC attempts to improve this situation by giving the agentic model itself the tools needed to curate 
+its own context. Crucially, the injected system prompt encourages the model to manage its environment 
+based on value rather than capacity or pressure first. Since a clean context usually results in significantly 
+better output quality, it is highly worthwhile to prune context blocks that no longer hold future worth, 
+even if immediate capacity pressure is minimal.
+
+We implement two mechanisms to enable this:
+
+* "context-status" messages are injected into the chat at certain points (at least once every 10% of context 
+  used, and more frequently in certain high-pressure situations) to allow the model to track the context situation.
+* A prune_context() tool is available to the model to list and exclude stale context blocks.
+
+We also added a /prune TUI command for the user to control context (and to restore blocks the agent model 
+erroneously deleted).
+
+### Evaluation Plan
+
+The roadmap is to use this PoC internally for a few weeks across a variety of models with differing competencies. 
+This testing window will allow us to evaluate and gather data on which types of models actually benefit from the 
+concept, if any.
+
+You can find additional details on the implementation
+in [Reflective context management](packages/coding-agent/docs/reflective-context.md)
+
+
+---
 
 * **[@earendil-works/pi-coding-agent](packages/coding-agent)**: Interactive coding agent CLI
 * **[@earendil-works/pi-agent-core](packages/agent)**: Agent runtime with tool calling and state management
@@ -22,22 +64,6 @@ To learn more about Pi:
 
 * [Visit pi.dev](https://pi.dev), the project website with demos
 * [Read the documentation](https://pi.dev/docs/latest), but you can also ask the agent to explain itself
-
-## Reflective context management
-
-**rxpi** is a focused fork of Pi with one addition: it gives the model explicit
-awareness of, and proactive control over, its own context window. Context is
-treated as a limited resource that the agent manages for relevance and quality,
-rather than something only compacted by the user or the harness when it fills
-up. Two mechanisms implement this:
-
-- **`[context-status]` messages** — threshold-triggered notes between turns
-  showing current context-window usage, so the model sees its own headroom.
-- **`prune_context`** — an always-available tool for the model to list and
-  exclude stale context blocks, with a `/prune` TUI as optional user control.
-
-See [Reflective context management](packages/coding-agent/docs/reflective-context.md)
-for the precise mechanism.
 
 ## All Packages
 
