@@ -115,6 +115,20 @@ describe("AgentSession setPruneState", () => {
 		expect(prompt).toContain("before capacity is scarce");
 	});
 
+	it("advertises ids as an array of strings", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		const parameters = harness.session.getToolDefinition("prune_context")?.parameters;
+		expect(parameters).toMatchObject({
+			type: "object",
+			properties: {
+				ids: {
+					type: "array",
+					items: { type: "string" },
+				},
+			},
+		});
+	});
+
 	it("spells out the list-then-prune workflow in the tool description", async () => {
 		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
 		const description = harness.session.getToolDefinition("prune_context")?.description ?? "";

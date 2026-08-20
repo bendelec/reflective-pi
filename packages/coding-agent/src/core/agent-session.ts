@@ -2846,9 +2846,8 @@ export class AgentSession {
 	 * blocks with their ids and previews.
 	 */
 	private _createPruneToolDefinition(): ToolDefinition {
-		// Use a permissive schema to avoid type coercion, then validate manually in execute
 		const schema = Type.Object({
-			ids: Type.Optional(Type.Any()),
+			ids: Type.Optional(Type.Array(Type.String())),
 		});
 
 		const truncateLine = (text: string, maxLength = 120): string =>
@@ -2866,6 +2865,32 @@ export class AgentSession {
 				"This tool only excludes and cannot restore blocks. Keep anything likely to matter; the user can restore excluded blocks with /prune.",
 			],
 			parameters: schema,
+			// Validate before TypeBox converts malformed values to the typed schema.
+			prepareArguments: (params) => {
+				if (!params || typeof params !== "object" || Array.isArray(params)) {
+					return params as { ids?: string[] };
+				}
+				const ids = (params as { ids?: unknown }).ids;
+				if (ids === undefined) {
+					return params as { ids?: string[] };
+				}
+				let parsedIds = ids;
+				if (typeof ids === "string") {
+					try {
+						parsedIds = JSON.parse(ids);
+					} catch {
+						// The array validation below reports the malformed string.
+					}
+				}
+				if (!Array.isArray(parsedIds)) {
+					throw new Error('Error: \'ids\' must be an array of block ids. Example: {"ids": ["id1", "id2"]}');
+				}
+				const invalidIds = parsedIds.filter((id) => typeof id !== "string");
+				if (invalidIds.length > 0) {
+					throw new Error(`Error: All ids must be strings. Found invalid ids: ${invalidIds.join(", ")}`);
+				}
+				return { ...params, ids: parsedIds };
+			},
 			execute: async (_toolCallId, params) => {
 				// Validate input format
 				// Note: Schema validation may not be enforced by all test harnesses,
