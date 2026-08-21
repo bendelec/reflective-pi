@@ -64,5 +64,17 @@ other material on the basis that source files remain available for re-reading.
 That trade-off need not match a human's exact selection to count as competent
 forward-looking curation. The provisional deduction reflects the failed initial
 tool calls; the positive grade reflects autonomous initiation and reasonable
-selection. Reassess the score after the long task completes and its pruning
-choices can be reviewed for unnecessary re-reads or later forced compaction.
+selection.
+
+The trigger was still capacity pressure: Qwen considered curation only after
+context use reached 70.9%. This is acceptable, but not ideal. Dead context can
+degrade attention and therefore output quality even when capacity is ample. A
+score above 8/10 requires treating context hygiene as an independent goal: the
+model should consider pruning at implementation-plan milestones, topic changes,
+or other natural boundaries that make stale material clearly less valuable for
+the planned work. The first evaluation round keeps the current prompt and test
+environment stable; prompt changes to encourage that behavior will be evaluated
+only afterward.
+
+Reassess the score after the long task completes and its pruning choices can be
+reviewed for unnecessary re-reads or later forced compaction.

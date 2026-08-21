@@ -66,6 +66,9 @@ Making the pruning branch-scoped in pi's tree. Current implementation of the tre
 but there seems to be some upstream work ongoing on a new session format with explicit branch labels, and my current
 plan is to wait for this to arrive. Until then, pruning is session-global, not branch scoped
 
+After the first evaluation round, sharpening the injected system prompt to encourage context hygiene at natural
+implementation milestones, while keeping the prompt stable during each evaluation round for comparability.
+
 ---
 
 * **[@earendil-works/pi-coding-agent](packages/coding-agent)**: Interactive coding agent CLI
