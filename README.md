@@ -51,7 +51,8 @@ This testing window will allow us to evaluate and gather data on which types of 
 concept, if any.
 
 You can find additional details on the implementation
-in [Reflective context management](packages/coding-agent/docs/reflective-context.md)
+in [Reflective context management](packages/coding-agent/docs/reflective-context.md).
+Current observations are tracked in [Reflective context evaluation results](packages/evals/reflective-context-results.md).
 
 
 ---
