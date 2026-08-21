@@ -54,6 +54,17 @@ You can find additional details on the implementation
 in [Reflective context management](packages/coding-agent/docs/reflective-context.md).
 Current observations are tracked in [Reflective context evaluation results](packages/evals/reflective-context-results.md).
 
+### Future work
+
+Adding a third state "summarized" to each block of messages (currently they can only be included or excluded),
+supporting a kind of granular micro compaction by topic / block
+
+Tracking context use for each message during the session and storing it with the session tree, so that the prun_context
+tool can preview the correct number of tokens gained by pruning each block (better decision making input for the model)
+
+Making the pruning branch-scoped in pi's tree. Current implementation of the tree in pi doesn't have branch labels/tags
+but there seems to be some upstream work ongoing on a new session format with explicit branch labels, and my current
+plan is to wait for this to arrive. Until then, pruning is session-global, not branch scoped
 
 ---
 
