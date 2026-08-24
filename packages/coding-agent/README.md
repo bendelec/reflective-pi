@@ -514,7 +514,7 @@ Read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/) 
 ## CLI Reference
 
 ```bash
-rxpi [options] [@files...] [messages...]
+rxpi [options] [--] [@files...] [messages...]
 ```
 
 ### Package Commands
@@ -546,7 +546,7 @@ rxpi config                    # Enable/disable package resources
 | `--mode rpc` | RPC mode for process integration (see [docs/rpc.md](docs/rpc.md)) |
 | `--export <in> [out]` | Export session to HTML |
 
-In print mode, pi also reads piped stdin and merges it into the initial prompt:
+In print mode, rxpi also reads piped stdin and merges it into the initial prompt:
 
 ```bash
 cat README.md | rxpi -p "Summarize this text"
@@ -613,6 +613,7 @@ Combine `--no-*` with explicit flags to load exactly what you need, ignoring set
 | `--verbose` | Force verbose startup |
 | `-a`, `--approve` | Trust project-local files for this run |
 | `-na`, `--no-approve` | Ignore project-local files for this run |
+| `--` | Stop option parsing; remaining arguments are prompts or `@file` inputs |
 | `-h`, `--help` | Show help |
 | `-v`, `--version` | Show version |
 
@@ -634,6 +635,9 @@ rxpi "List all .ts files in src/"
 
 # Non-interactive
 rxpi -p "Summarize this codebase"
+
+# Prompt beginning with a dash
+rxpi -p -- "- Summarize these points"
 
 # Non-interactive with piped stdin
 cat README.md | rxpi -p "Summarize this text"
