@@ -14,7 +14,7 @@ was therefore unavoidable.
 | Model | Hosting / quantization | Subjective grade | Short summary |
 | --- | --- | --- | --- |
 | DeepSeek V4 Flash | Local Dwarfstar `ds4`; `dwarfstar-iq2` | 3/10 | It can use `prune_context` effectively after explicit user direction, but did not autonomously sustain curation: seven automatic compactions occurred, including four after its final reminder. |
-| Qwen3.8 27B | Local Lemonade; `UD-Q8-L-XL` | Preliminary 7/10 | Independently chose context curation at 71% and made a conscious, reasonable selection. Its initial calls exposed an under-specified `ids` schema and failed until that contract was typed as `string[]`. |
+| Qwen3.8 27B | Local Lemonade; `UD-Q8-L-XL` | 5/10 | It made three substantial, deliberate cleanups after independently recognizing stale context, but then relied on six automatic compactions through the harder second half of the task. |
 
 ## Observations by model
 
@@ -44,7 +44,7 @@ that the current prompts alone cause models to manage context proactively.
 
 ### Qwen3.8 27B — local Lemonade, `UD-Q8-L-XL`
 
-**Status:** Task in progress; preliminary grade: **7/10**.
+**Status:** Final grade: **5/10**.
 
 At 70.9% context use, without user intervention, the model decided to curate
 its context before beginning its next work package. It listed the blocks,
@@ -57,14 +57,15 @@ but is materially mitigated by rxpi's then-untyped tool schema: the model was
 told only that `ids` accepted `Any`, despite the tool requiring an array of
 strings. DeepSeek V4 Flash did not encounter this problem, but the schema was
 still an avoidable contract ambiguity. After the schema was changed to advertise
-`ids: string[]`, a restarted session successfully pruned 62 blocks.
+`ids: string[]`, a restarted session successfully pruned 62 blocks. It later
+made two further deliberate selections of 43 and 67 blocks.
 
 The model consciously retained some potentially valuable context and excluded
 other material on the basis that source files remain available for re-reading.
 That trade-off need not match a human's exact selection to count as competent
-forward-looking curation. The provisional deduction reflects the failed initial
-tool calls; the positive grade reflects autonomous initiation and reasonable
-selection.
+forward-looking curation. The initial syntax failures are therefore not a
+material score deduction: the exposed schema was ambiguous, and the model used
+the corrected contract successfully.
 
 The trigger was still capacity pressure: Qwen considered curation only after
 context use reached 70.9%. This is acceptable, but not ideal. Dead context can
@@ -72,9 +73,23 @@ degrade attention and therefore output quality even when capacity is ample. A
 score above 8/10 requires treating context hygiene as an independent goal: the
 model should consider pruning at implementation-plan milestones, topic changes,
 or other natural boundaries that make stale material clearly less valuable for
-the planned work. The first evaluation round keeps the current prompt and test
-environment stable; prompt changes to encourage that behavior will be evaluated
-only afterward.
+the planned work.
 
-Reassess the score after the long task completes and its pruning choices can be
-reviewed for unnecessary re-reads or later forced compaction.
+It did not sustain the promising initial behavior. After the third cleanup, it
+allowed six automatic compactions, repeatedly continuing through 80–97% context
+use without making another pruning selection. At 88.5%, it explicitly chose to
+write a comprehensive completion report instead of curating and immediately
+triggered compaction. At 95%, it called `prune_context` only after compaction
+had already reduced the context, then mistakenly credited the listing call for
+the reduction and selected nothing.
+
+One compaction attempt also failed when recorded context use reached 124,600
+tokens: adding the compaction prompt and system instructions exceeded Qwen's
+131,072-token input limit. The user temporarily switched to a larger-context
+model to perform that compaction. This is an inherited harness reserve failure,
+not a Qwen failure, and does not lower the grade.
+
+A 5/10 reflects real autonomous and deliberate pruning early in the task, but
+no durable hygiene habit through its difficult second half. This session used
+the original prompt; the strengthened quality-driven policy and >80% fallback
+instruction were introduced afterward and require separate evaluation.
