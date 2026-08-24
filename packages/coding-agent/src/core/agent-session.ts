@@ -635,9 +635,9 @@ export class AgentSession {
 		const tokens = usage.tokens;
 		const contextWindow = usage.contextWindow;
 		const last = this._contextStatusLastPercent;
-		const build = () => {
+		const build = (requireHygieneCheck = false) => {
 			this._contextStatusLastPercent = percent;
-			return createContextStatusMessage(contextWindow, Math.round(tokens), percent, Date.now());
+			return createContextStatusMessage(contextWindow, Math.round(tokens), percent, Date.now(), requireHygieneCheck);
 		};
 
 		// Force a message after prune operations so the user can verify the pruning worked
@@ -647,7 +647,7 @@ export class AgentSession {
 		}
 
 		if (percent >= 80) {
-			return build();
+			return build(true);
 		}
 
 		if (last !== null && Math.floor(percent / 10) > Math.floor(last / 10)) {
@@ -684,6 +684,7 @@ export class AgentSession {
 			Math.round(usage.tokens),
 			usage.percent,
 			Date.now(),
+			usage.percent >= 80,
 		);
 		this._contextStatusLastPercent = usage.percent;
 		this.agent.state.messages.push(message);
@@ -2860,7 +2861,7 @@ export class AgentSession {
 				'Manage your working set by excluding blocks that no longer matter for the work ahead. First call prune_context with no parameters to list the current blocks, ids, and one-line previews. Then call prune_context with {"ids": ["id1", "id2"]} to exclude selected blocks. A tool call and its results are always excluded together. This tool only excludes and cannot restore blocks: keep anything likely to matter for future work. The session transcript remains intact; the user can restore blocks with /prune.',
 			promptSnippet: "Exclude context blocks that no longer matter for the work ahead.",
 			promptGuidelines: [
-				"Use prune_context proactively to remove blocks that no longer support the planned next steps or likely follow-up work; do not wait for context pressure.",
+				"Treat context hygiene as a quality requirement. At natural work boundaries, use prune_context to remove blocks that no longer support the planned next steps or likely follow-up work; do not wait for context pressure.",
 				"First list the current blocks, then exclude selected ids. A tool call and its results are always excluded together.",
 				"This tool only excludes and cannot restore blocks. Keep anything likely to matter; the user can restore excluded blocks with /prune.",
 			],

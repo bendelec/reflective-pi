@@ -105,14 +105,14 @@ describe("AgentSession setPruneState", () => {
 		expect(text).toContain("user: hello");
 	});
 
-	it("includes the context-curation guide in the system prompt", async () => {
+	it("frames context hygiene as a quality requirement in the system prompt", async () => {
 		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
 		const prompt = harness.session.systemPrompt;
 		expect(prompt).toContain("prune_context");
 		expect(prompt).toContain("context is your working set");
-		// Context is framed as relevance/quality, not capacity pressure.
-		expect(prompt).toContain("context quality depends on relevance");
-		expect(prompt).toContain("before capacity is scarce");
+		expect(prompt).toContain("competes for attention");
+		expect(prompt).toContain("natural work boundaries");
+		expect(prompt).toContain("safety signal, not the normal trigger");
 	});
 
 	it("advertises ids as an array of strings", async () => {
@@ -139,11 +139,11 @@ describe("AgentSession setPruneState", () => {
 		expect(description).toContain("/prune");
 	});
 
-	it("frames context status as capacity measurement rather than the prune trigger", async () => {
+	it("frames capacity pressure as a context-hygiene safety fallback", async () => {
 		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
 		const prompt = harness.session.systemPrompt;
-		expect(prompt).toContain("These messages measure capacity");
-		expect(prompt).toContain("do not determine when to prune");
+		expect(prompt).toContain("Context-status messages measure capacity only");
+		expect(prompt).toContain("safety signal, not the normal trigger for hygiene");
 	});
 
 	it("returns error for malformed parameters", async () => {

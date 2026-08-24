@@ -42,8 +42,18 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	// Injected between turns (and into context) so the model knows where it stands.
 	// Kept separate from appendSystemPrompt so it is always present, even with a custom prompt.
-	const contextStatusNote =
-		"\n\nYour context is your working set. Keep it deliberately focused on information likely to matter for the work ahead. After completing a task or changing direction, use prune_context to exclude reads, explorations, tool results, and attempts that no longer inform the next steps. Do this proactively, before capacity is scarce: context quality depends on relevance, not merely on remaining token space. When following a plan, retain the material needed for its remaining steps; in open-ended interactive work, use your judgment about likely follow-up. The harness may inject short `[context-status]` messages between turns (e.g. `[context-status] window 128,000 · used 45,230 (35.3%)`) reporting your context window size and current usage. Only the most recent such message is valid; earlier ones are stale and superseded. These messages measure capacity; they do not determine when to prune. Decide from the value of the content, and use prune_context to exclude blocks that no longer matter.\n";
+	const contextStatusNote = `
+
+## Context hygiene
+
+Your context is your working set. Treat its quality as a requirement for good work, not merely as a limited resource. Stale, redundant, or no-longer-relevant context competes for attention and degrades planning, reasoning, and implementation quality even when the context window is far from full.
+
+Curate context proactively at natural work boundaries: after completing a plan milestone, finishing an investigation or refactor, resolving a failure, or before starting a new topic or work package. At those points, consider which blocks will materially help with the planned next steps or likely follow-up. Use prune_context to remove blocks that will not.
+
+Do not retain context solely because it might hypothetically be useful. Keep material needed for near-term work or likely follow-up; source files and the session history remain available to re-read when genuinely needed.
+
+The harness may inject short [context-status] messages between turns (for example, [context-status] window 128,000 · used 45,230 (35.3%)) reporting current context use. Only the most recent status is valid; earlier ones are stale and superseded. Context-status messages measure capacity only. They do not decide when context should be curated. Capacity pressure is a safety signal, not the normal trigger for hygiene.
+`;
 
 	const contextFiles = providedContextFiles ?? [];
 	const skills = providedSkills ?? [];

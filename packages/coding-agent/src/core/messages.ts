@@ -75,7 +75,7 @@ export interface CompactionSummaryMessage {
  */
 export interface ContextStatusMessage {
 	role: "contextStatus";
-	/** Single-line text sent to the model and shown in the TUI. */
+	/** Text sent to the model and shown in the TUI; high-pressure notes add a hygiene instruction. */
 	content: string;
 	/** Context usage percentage (0-100), used to pick the TUI highlight color. */
 	percent: number;
@@ -155,6 +155,8 @@ export function createCustomMessage(
 }
 
 export const CONTEXT_STATUS_TAG = "[context-status]";
+export const CONTEXT_HYGIENE_CHECK_REQUIRED =
+	"CONTEXT HYGIENE CHECK REQUIRED: Before continuing substantive work, call prune_context with no parameters, assess the listed blocks against the planned next steps, and exclude every block that no longer adds value. Do not wait for automatic compaction.";
 
 /** Format a context status line: `[context-status] window 128,000 · used 45,230 (35.3%)`. */
 export function formatContextStatus(contextWindow: number, used: number, percent: number): string {
@@ -166,10 +168,13 @@ export function createContextStatusMessage(
 	used: number,
 	percent: number,
 	timestamp: number,
+	requireHygieneCheck = false,
 ): ContextStatusMessage {
 	return {
 		role: "contextStatus",
-		content: formatContextStatus(contextWindow, used, percent),
+		content: requireHygieneCheck
+			? `${formatContextStatus(contextWindow, used, percent)}\n\n${CONTEXT_HYGIENE_CHECK_REQUIRED}`
+			: formatContextStatus(contextWindow, used, percent),
 		percent,
 		timestamp,
 	};

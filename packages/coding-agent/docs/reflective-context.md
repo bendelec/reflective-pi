@@ -31,7 +31,7 @@ is emitted only after a turn that actually executed tool work finished, and only
 when at least one of the following holds:
 
 - context is at least **80%** full (reported on every such turn while it stays
-  that full);
+  that full, with a mandatory context-hygiene check instruction);
 - the usage percentage crossed a **10% multiple** since the last message (e.g.
   20% → 30%);
 - the just-finished turn grew context usage by more than **5 percentage
@@ -47,15 +47,20 @@ turn instead.
 A status message is an ordinary message: it is appended to the transcript,
 persisted to the session file, rendered as a highlighted line in the TUI (accent
 below 70% usage, warning at 70% and above), and sent to the model on the next
-request. The model's system prompt frames context as its working set: it keeps
-information likely to matter for work ahead and, after completing a task or
-changing direction, excludes reads, explorations, tool results, and attempts
-that no longer inform the next steps. It does this before capacity is scarce,
-because context quality depends on relevance rather than remaining token space.
-When following a plan, it retains material needed for the remaining steps; in
-open-ended interactive work, it uses judgment about likely follow-up. The
-`[context-status]` figures measure capacity; they do not determine when to
-prune. Curation is based on the value of the content.
+request. The model's system prompt treats context hygiene as a quality
+requirement, not merely a capacity concern: stale or redundant context competes
+for attention and degrades planning, reasoning, and implementation quality even
+when the context window is far from full. The model should therefore assess its
+working set at natural boundaries — after a plan milestone, investigation,
+refactor, or failure, and before a new topic or work package — then retain only
+material likely to help with the planned next steps or likely follow-up.
+
+`[context-status]` figures measure capacity; capacity pressure is a safety
+signal rather than the normal hygiene trigger. At 80% or more, the status note
+adds a mandatory fallback instruction to list blocks with `prune_context` and
+exclude every block that no longer adds value before continuing substantive
+work. This gives models that do not independently curate their context a clear
+last-resort action before automatic compaction.
 
 ## `prune_context` — the agent curates its own context
 
