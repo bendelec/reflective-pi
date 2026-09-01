@@ -63,10 +63,37 @@ describe("defaultTools setting", () => {
 				.getAllTools()
 				.map((tool) => tool.name)
 				.sort(),
-		).toEqual(["bash", "edit", "find", "grep", "ls", "prune_context", "read", "summarize_context", "write"]);
+		).toEqual([
+			"bash",
+			"edit",
+			"find",
+			"grep",
+			"ls",
+			"powershell",
+			"prune_context",
+			"read",
+			"summarize_context",
+			"write",
+		]);
 		expect(session.getActiveToolNames()).toEqual(["grep", "find", "prune_context", "summarize_context"]);
 		expect(session.systemPrompt).toContain("- grep:");
 		expect(session.systemPrompt).not.toContain("- read:");
+		session.dispose();
+	});
+
+	it("can select powershell instead of bash", async () => {
+		const session = await createSession(["read", "powershell", "edit", "write"]);
+
+		expect(session.getActiveToolNames()).toEqual([
+			"read",
+			"powershell",
+			"edit",
+			"write",
+			"prune_context",
+			"summarize_context",
+		]);
+		expect(session.systemPrompt).toContain("- powershell: Execute PowerShell commands");
+		expect(session.systemPrompt).not.toContain("- bash:");
 		session.dispose();
 	});
 
@@ -150,7 +177,18 @@ describe("defaultTools setting", () => {
 				.getAllTools()
 				.map((tool) => tool.name)
 				.sort(),
-		).toEqual(["bash", "edit", "find", "grep", "ls", "prune_context", "read", "summarize_context", "write"]);
+		).toEqual([
+			"bash",
+			"edit",
+			"find",
+			"grep",
+			"ls",
+			"powershell",
+			"prune_context",
+			"read",
+			"summarize_context",
+			"write",
+		]);
 		expect(session.getActiveToolNames()).toEqual(["ls", "prune_context", "summarize_context"]);
 		session.dispose();
 	});
