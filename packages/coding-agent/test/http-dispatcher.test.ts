@@ -2,7 +2,11 @@ import net from "node:net";
 import tls from "node:tls";
 import * as undici from "undici";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyHttpProxySettings, configureHttpDispatcher } from "../src/core/http-dispatcher.ts";
+import {
+	applyHttpProxySettings,
+	configureHttpDispatcher,
+	createBunFetchWithTimeout,
+} from "../src/core/http-dispatcher.ts";
 
 const PROXY_ENV_KEYS = ["HTTP_PROXY", "HTTPS_PROXY"] as const;
 const DISPATCHER_PROXY_ENV_KEYS = [...PROXY_ENV_KEYS, "http_proxy", "https_proxy"] as const;
@@ -53,6 +57,36 @@ describe("http proxy settings", () => {
 
 		expect(process.env.HTTP_PROXY).toBeUndefined();
 		expect(process.env.HTTPS_PROXY).toBeUndefined();
+	});
+});
+
+describe("Bun fetch timeout", () => {
+	it("uses the configured timeout while preserving an explicit request timeout", async () => {
+		const fetch = vi.fn(async () => new Response());
+		const wrappedFetch = createBunFetchWithTimeout(fetch, 60_000);
+
+		await wrappedFetch("https://example.test/default");
+		await wrappedFetch("https://example.test/explicit", { timeout: 120_000 } as RequestInit);
+
+		expect(fetch).toHaveBeenNthCalledWith(
+			1,
+			"https://example.test/default",
+			expect.objectContaining({ timeout: 60_000 }),
+		);
+		expect(fetch).toHaveBeenNthCalledWith(
+			2,
+			"https://example.test/explicit",
+			expect.objectContaining({ timeout: 120_000 }),
+		);
+	});
+
+	it("maps a disabled timeout to Bun's maximum supported timeout", async () => {
+		const fetch = vi.fn(async () => new Response());
+		const wrappedFetch = createBunFetchWithTimeout(fetch, 0);
+
+		await wrappedFetch("https://example.test");
+
+		expect(fetch).toHaveBeenCalledWith("https://example.test", expect.objectContaining({ timeout: 2147483647 }));
 	});
 });
 

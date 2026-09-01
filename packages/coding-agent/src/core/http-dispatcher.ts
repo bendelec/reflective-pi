@@ -16,6 +16,44 @@ export const HTTP_IDLE_TIMEOUT_CHOICES = [
 const originalGlobalFetch = globalThis.fetch;
 let installedGlobalFetch: typeof globalThis.fetch | undefined;
 
+// Bun's native fetch has a five-minute request timeout by default. Its undici
+// compatibility module is a stub in compiled binaries, so installing an undici
+// dispatcher cannot change that timeout. Bun accepts `timeout` as a fetch
+// extension, even though it is not part of the standard RequestInit type.
+interface BunRequestInit extends RequestInit {
+	timeout?: number;
+}
+
+function canReplaceGlobalFetch(): boolean {
+	return installedGlobalFetch === undefined
+		? globalThis.fetch === originalGlobalFetch
+		: globalThis.fetch === installedGlobalFetch;
+}
+
+export function createBunFetchWithTimeout(fetch: typeof globalThis.fetch, timeoutMs: number): typeof globalThis.fetch {
+	// Bun treats zero as an immediate timeout, unlike Pi's setting where zero
+	// means disabled. Match provider SDK handling with an effectively infinite
+	// finite value.
+	const effectiveTimeoutMs = timeoutMs === 0 ? 2147483647 : timeoutMs;
+	return (input, init) => {
+		const bunInit = init as BunRequestInit | undefined;
+		return fetch(input, {
+			...init,
+			timeout: bunInit?.timeout ?? effectiveTimeoutMs,
+		} as BunRequestInit);
+	};
+}
+
+function installBunFetchTimeout(timeoutMs: number): boolean {
+	if (process.versions.bun === undefined) return false;
+	if (!canReplaceGlobalFetch()) return true;
+
+	const fetchWithTimeout = createBunFetchWithTimeout(originalGlobalFetch, timeoutMs);
+	globalThis.fetch = fetchWithTimeout;
+	installedGlobalFetch = fetchWithTimeout;
+	return true;
+}
+
 export function parseHttpIdleTimeoutMs(value: unknown): number | undefined {
 	if (typeof value === "string") {
 		const trimmed = value.trim();
@@ -83,6 +121,8 @@ export function configureHttpDispatcher(timeoutMs: number = DEFAULT_HTTP_IDLE_TI
 	if (normalizedTimeoutMs === undefined) {
 		throw new Error(`Invalid HTTP idle timeout: ${String(timeoutMs)}`);
 	}
+	if (installBunFetchTimeout(normalizedTimeoutMs)) return;
+
 	const dispatcher = withUndiciErrorListener(
 		new undici.EnvHttpProxyAgent({
 			allowH2: false,
@@ -100,11 +140,7 @@ export function configureHttpDispatcher(timeoutMs: number = DEFAULT_HTTP_IDLE_TI
 	// bundled fetch can otherwise consume compressed responses through npm undici's
 	// dispatcher without decompressing them, causing response.json() failures.
 	// If a caller replaced fetch after module load, preserve that deliberate override.
-	const shouldInstallGlobals =
-		installedGlobalFetch === undefined
-			? globalThis.fetch === originalGlobalFetch
-			: globalThis.fetch === installedGlobalFetch;
-	if (shouldInstallGlobals) {
+	if (canReplaceGlobalFetch()) {
 		undici.install?.();
 		installedGlobalFetch = globalThis.fetch;
 	}
