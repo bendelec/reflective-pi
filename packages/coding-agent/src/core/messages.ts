@@ -156,7 +156,7 @@ export function createCustomMessage(
 
 export const CONTEXT_STATUS_TAG = "[context-status]";
 export const CONTEXT_HYGIENE_CHECK_REQUIRED =
-	"CONTEXT HYGIENE CHECK REQUIRED: Before continuing substantive work, call prune_context with no parameters, assess the listed blocks against the planned next steps, and exclude every block that no longer adds value. Do not wait for automatic compaction.";
+	"CONTEXT HYGIENE CHECK REQUIRED: Before continuing substantive work, call list_context to review the current blocks, assess them against the planned next steps, and exclude every block that no longer adds value with prune_context. Do not wait for automatic compaction.";
 
 /** Format a context status line: `[context-status] window 128,000 · used 45,230 (35.3%)`. */
 export function formatContextStatus(contextWindow: number, used: number, percent: number): string {

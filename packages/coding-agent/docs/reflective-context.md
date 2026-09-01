@@ -12,7 +12,8 @@ overflows, and the user can trigger compaction manually.
 
 `rxpi` adds a second, agentic lever. It treats context as a curated working
 set that the model is made aware of (via `[context-status]` messages) and can
-curate itself (via the `prune_context` tool). The goal is relevance and quality —
+curate itself (via the `list_context`, `prune_context`, and `summarize_context`
+tools). The goal is relevance and quality —
 retain what still has value for the work at hand, exclude what is completed,
 stale, or superseded — rather than relying only on user- or harness-driven
 compaction after the fact.
@@ -57,28 +58,58 @@ material likely to help with the planned next steps or likely follow-up.
 
 `[context-status]` figures measure capacity; capacity pressure is a safety
 signal rather than the normal hygiene trigger. At 80% or more, the status note
-adds a mandatory fallback instruction to list blocks with `prune_context` and
+adds a mandatory fallback instruction to list blocks with `list_context` and
 exclude every block that no longer adds value before continuing substantive
 work. This gives models that do not independently curate their context a clear
 last-resort action before automatic compaction.
 
-## `prune_context` — the agent curates its own context
+## `list_context` and `prune_context` — the agent curates its own context
 
-The central feature is the always-available `prune_context` tool, which lets the
-model reduce its own context deliberately. It has two modes:
+The always-available context tools are split by verb: `list_context` inspects,
+`prune_context` mutates, `summarize_context` replaces.
 
-- **List** — called with no parameters, it returns the current context blocks,
-  each with a short id and a one-line preview.
-- **Prune** — called with `{"ids": ["id1", "id2"]}`, it **excludes** the matched
-  blocks from context.
+### Why one verb per tool
+
+`prune_context` originally had two modes: called with no parameters it listed
+the current blocks, and called with `{"ids": [...]}` it excluded them.
+Evaluation showed a recurring failure with that dual-mode interface: models
+that had used the tool correctly would, later in a session, call it bare or
+with an empty ids array and then report that they had successfully pruned the
+context. The bare call returned a success-shaped listing, so nothing in the
+transcript contradicted that claim.
+
+The interface now follows one principle: **a tool should have one verb.** A
+mutating tool must fail loudly when its mutation payload is missing, so misuse
+can never read as success. Concretely:
+
+- `list_context` is read-only, takes no parameters, and ends with an explicit
+  note that listing changes nothing.
+- `prune_context` requires a non-empty `ids` array. A bare call, an empty
+  array, or ids that match nothing fail with an error result that points at
+  `list_context`, turning misuse into a self-correcting loop:
+  call → error → list → call with ids.
+- `summarize_context` follows the same rule.
+
+### `list_context`
+
+Called with no parameters, it returns the current context blocks, each with a
+short id and a one-line preview, plus a read-only reminder of how to act on
+them.
+
+### `prune_context`
+
+Called with `{"ids": ["id1", "id2"]}`, it **excludes** the matched blocks from
+context. A tool call and its results are always excluded together. When some
+ids match and others do not, the matched blocks are excluded and the unknown
+ids are reported; when no id matches, the call fails without changing
+anything.
 
 Blocks are the atomic unit of pruning. A **tool exchange** — an assistant
 message containing tool calls plus every immediately-following tool result — is
 one block, pruned all-or-nothing so a result is never left dangling from its
-call. Every other message is a block of one. The id the tool reports (and
-accepts) is the block's *first* entry id.
+call. Every other message is a block of one. The id the tools report (and
+accept) is the block's *first* entry id.
 
-Unknown ids are reported and ignored; each matched block is excluded atomically.
 Exclusion is all the tool does — `prune_context` has no restore/reverse mode.
 
 ## How exclusion works — context vs. history
@@ -101,7 +132,7 @@ tool (see below).
 
 `summarize_context` is a separate agent tool for blocks whose full text is no
 longer useful but whose essential result may matter later. The normal workflow
-is to first list current blocks with `prune_context`, then call
+is to first list current blocks with `list_context`, then call
 `summarize_context` with one or more reported IDs. Each selected atomic block is
 sent independently to the configured summary model. rxpi appends a
 `"summarized"` prune marker for every entry in that block; only the marker for

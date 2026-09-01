@@ -314,6 +314,11 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 	return tokens;
 }
 
+/** Truncate a block preview line for tool listings and success confirmations. */
+function truncatePreviewLine(text: string, maxLength = 120): string {
+	return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -2926,30 +2931,73 @@ export class AgentSession {
 	}
 
 	/**
+	 * Create the read-only `list_context` tool.
+	 *
+	 * Reports the current context blocks with their ids and one-line previews.
+	 * Companion to the mutating tools: the ids reported here are the ids accepted
+	 * by `prune_context` and `summarize_context`. Takes no parameters.
+	 */
+	private _createListToolDefinition(): ToolDefinition {
+		return {
+			name: "list_context",
+			label: "List Context",
+			description:
+				"List the current context blocks with their ids and one-line previews. Takes no parameters and changes nothing. Use the reported ids with prune_context or summarize_context to manage the blocks.",
+			promptSnippet: "List current context blocks with ids and previews.",
+			promptGuidelines: [
+				"Call list_context with no parameters to inspect the current blocks and their ids before pruning or summarizing.",
+			],
+			parameters: Type.Object({}),
+			execute: async () => {
+				const blocks = groupPruneBlocks(this.sessionManager.buildContextEntries());
+				const lines: string[] = [];
+				for (const block of blocks) {
+					const preview = previewBlock(block);
+					const blockId = block.entryIds[0] ?? "(no id)";
+					lines.push(`${blockId}  ${truncatePreviewLine(preview.line)}`);
+					for (const detail of preview.detail) {
+						lines.push(`          ${truncatePreviewLine(detail)}`);
+					}
+				}
+				if (lines.length === 0) {
+					return { content: [{ type: "text", text: "No context blocks to list." }], details: {} };
+				}
+				const text = [
+					`Current context blocks (${blocks.length}) — prune or summarize by id:`,
+					lines.join("\n"),
+					"",
+					'Listing is read-only. To exclude blocks call prune_context with {"ids": [...]}; to replace blocks with summaries call summarize_context with {"ids": [...]}.',
+				].join("\n");
+				return { content: [{ type: "text", text }], details: {} };
+			},
+		};
+	}
+
+	/**
 	 * Create the session-aware `prune_context` tool.
 	 *
-	 * Lets the model prune (exclude) message groups from its own context by
-	 * message id — the id of each block's first message, as shown by calling
-	 * prune_context without arguments. Called with no ids, it lists the current
-	 * blocks with their ids and previews.
+	 * Lets the model exclude blocks from its own context by block id — the id of
+	 * each block's first message, as reported by `list_context`. Requires a
+	 * non-empty ids array; calling it without one is an error that points at
+	 * `list_context`. Mutating tool with a single verb: it never lists.
 	 */
 	private _createPruneToolDefinition(): ToolDefinition {
+		// The schema stays lenient (optional ids) so misuse reaches execute, which
+		// fails with a guided error pointing at list_context. A strict schema would
+		// instead surface a generic validation message without that guidance.
 		const schema = Type.Object({
 			ids: Type.Optional(Type.Array(Type.String())),
 		});
-
-		const truncateLine = (text: string, maxLength = 120): string =>
-			text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
 
 		return {
 			name: "prune_context",
 			label: "Prune Context",
 			description:
-				'Manage your working set by excluding blocks that no longer matter for the work ahead. First call prune_context with no parameters to list the current blocks, ids, and one-line previews. Then call prune_context with {"ids": ["id1", "id2"]} to exclude selected blocks. A tool call and its results are always excluded together. This tool only excludes and cannot restore blocks: keep anything likely to matter for future work. The session transcript remains intact; the user can restore blocks with /prune.',
+				'Exclude context blocks that no longer matter for the work ahead. Call list_context with no parameters to see the current blocks and their ids, then call prune_context with {"ids": ["id1", "id2"]} to exclude the selected blocks. A tool call and its results are always excluded together. This tool only excludes and cannot restore blocks: keep anything likely to matter for future work. The session transcript remains intact; the user can restore blocks with /prune.',
 			promptSnippet: "Exclude context blocks that no longer matter for the work ahead.",
 			promptGuidelines: [
 				"Treat context hygiene as a quality requirement. At natural work boundaries, use prune_context to remove blocks that no longer support the planned next steps or likely follow-up work; do not wait for context pressure.",
-				"First list the current blocks, then exclude selected ids. A tool call and its results are always excluded together.",
+				"Call list_context to see the current blocks, then exclude the selected ids. A tool call and their results are always excluded together.",
 				"This tool only excludes and cannot restore blocks. Keep anything likely to matter; the user can restore excluded blocks with /prune.",
 			],
 			parameters: schema,
@@ -2971,7 +3019,9 @@ export class AgentSession {
 					}
 				}
 				if (!Array.isArray(parsedIds)) {
-					throw new Error('Error: \'ids\' must be an array of block ids. Example: {"ids": ["id1", "id2"]}');
+					throw new Error(
+						'Error: \'ids\' must be an array of block ids from list_context. Example: {"ids": ["id1", "id2"]}',
+					);
 				}
 				const invalidIds = parsedIds.filter((id) => typeof id !== "string");
 				if (invalidIds.length > 0) {
@@ -2980,45 +3030,12 @@ export class AgentSession {
 				return { ...params, ids: parsedIds };
 			},
 			execute: async (_toolCallId, params) => {
-				// Validate input format
-				// Note: Schema validation may not be enforced by all test harnesses,
-				// so we validate here as well to ensure proper error handling
-				const hasIdsProperty = params && typeof params === "object" && "ids" in params;
-				const isEmptyParams = !params || (typeof params === "object" && Object.keys(params).length === 0);
-
-				// List mode: no parameters at all
-				if (isEmptyParams) {
-					const blocks = groupPruneBlocks(this.sessionManager.buildContextEntries());
-					const lines: string[] = [];
-					for (const block of blocks) {
-						const preview = previewBlock(block);
-						const blockId = block.entryIds[0] ?? "(no id)";
-						lines.push(`${blockId}  ${truncateLine(preview.line)}`);
-						for (const detail of preview.detail) {
-							lines.push(`          ${truncateLine(detail)}`);
-						}
-					}
-					const text =
-						lines.length > 0
-							? `Current context blocks (${blocks.length}) — prune by id:\n${lines.join("\n")}`
-							: "No context blocks to list.";
-					return { content: [{ type: "text", text }], details: {} };
-				}
-
-				// Prune mode: must have 'ids' property
-				if (!hasIdsProperty) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: 'Error: Invalid parameters. Call prune_context with no parameters to list blocks, or with {"ids": ["id1", "id2"]} to prune specific blocks.',
-							},
-						],
-						details: {},
-					};
-				}
-
-				const ids = (params as { ids?: unknown }).ids;
+				// Validate input format. prepareArguments already validates, but schema
+				// validation may not be enforced by all harnesses, so validate here too.
+				const ids =
+					params && typeof params === "object" && !Array.isArray(params)
+						? (params as { ids?: unknown }).ids
+						: undefined;
 
 				// Handle case where ids comes as a JSON string (provider serialization issue)
 				let parsedIds = ids;
@@ -3030,31 +3047,17 @@ export class AgentSession {
 					}
 				}
 
-				// Validate ids is an array
-				if (!Array.isArray(parsedIds)) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: 'Error: \'ids\' must be an array of block ids. Example: {"ids": ["id1", "id2"]}',
-							},
-						],
-						details: {},
-					};
+				// A mutating tool must fail loudly when the mutation payload is missing,
+				// so a bare or empty call can never be mistaken for a successful prune.
+				if (!Array.isArray(parsedIds) || parsedIds.length === 0) {
+					throw new Error(
+						'Error: prune_context requires {"ids": ["id1", "id2"]} with at least one block id. Call list_context with no parameters to list the current blocks.',
+					);
 				}
 
-				// Validate all ids are strings
 				const invalidIds = parsedIds.filter((id) => typeof id !== "string");
 				if (invalidIds.length > 0) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Error: All ids must be strings. Found invalid ids: ${invalidIds.join(", ")}`,
-							},
-						],
-						details: {},
-					};
+					throw new Error(`Error: All ids must be strings. Found invalid ids: ${invalidIds.join(", ")}`);
 				}
 
 				// Prune the blocks
@@ -3072,6 +3075,11 @@ export class AgentSession {
 					if (block) matched.push(block);
 					else unknown.push(id);
 				}
+				if (matched.length === 0) {
+					throw new Error(
+						`Error: No current context blocks matched.${unknown.length > 0 ? ` Unknown id(s): ${unknown.join(", ")}.` : ""} Call list_context with no parameters to list the current blocks.`,
+					);
+				}
 
 				for (const block of matched) {
 					this.setPruneState(block.entryIds, "excluded");
@@ -3082,19 +3090,17 @@ export class AgentSession {
 				// Force a context-status message on the next turn so the user can verify the pruning worked
 				this._contextStatusForceNext = true;
 
-				const prunedLines = matched.map((block) => truncateLine(previewBlock(block).line));
-				const lines: string[] = [];
-				lines.push(`Pruned ${matched.length} block(s).`);
-				if (prunedLines.length > 0) {
-					lines.push("");
-					for (const line of prunedLines) {
-						lines.push(`  - ${line}`);
-					}
+				const lines: string[] = [`Pruned ${matched.length} block(s).`];
+				lines.push("");
+				for (const block of matched) {
+					lines.push(`  - ${truncatePreviewLine(previewBlock(block).line)}`);
 				}
 				if (unknown.length > 0) {
 					lines.push("");
 					lines.push(`Unknown id(s): ${unknown.join(", ")}.`);
 				}
+				lines.push("");
+				lines.push(`${blocks.length - matched.length} block(s) remain.`);
 				return { content: [{ type: "text", text: lines.join("\n") }], details: {} };
 			},
 		};
@@ -3102,17 +3108,17 @@ export class AgentSession {
 
 	/** Create the session-aware `summarize_context` tool. */
 	private _createSummarizeToolDefinition(): ToolDefinition {
-		const schema = Type.Object({ ids: Type.Array(Type.String(), { minItems: 1 }) });
-		const error = (text: string) => ({ content: [{ type: "text" as const, text }], details: {} });
-
+		// Lenient for the same reason as prune_context: guided errors over generic
+		// schema-validation messages.
+		const schema = Type.Object({ ids: Type.Optional(Type.Array(Type.String())) });
 		return {
 			name: "summarize_context",
 			label: "Summarize Context",
 			description:
-				'Replace selected context blocks with concise summaries. First call prune_context with no parameters to list the current blocks and ids. Then call summarize_context with {"ids": ["id1", "id2"]}. Each selected atomic block is summarized independently and can be restored with /prune.',
+				'Replace selected context blocks with concise summaries. First call list_context with no parameters to list the current blocks and ids. Then call summarize_context with {"ids": ["id1", "id2"]}. Each selected atomic block is summarized independently and can be restored with /prune.',
 			promptSnippet: "Replace selected context blocks with concise summaries.",
 			promptGuidelines: [
-				"First use prune_context to inspect the current blocks, then use summarize_context for blocks whose essential information may still help later but whose full text is no longer worth retaining.",
+				"First call list_context to inspect the current blocks, then use summarize_context for blocks whose essential information may still help later but whose full text is no longer worth retaining.",
 				"Use prune_context instead when a block has no likely future value. Summarized blocks can be restored by the user with /prune.",
 			],
 			parameters: schema,
@@ -3134,13 +3140,13 @@ export class AgentSession {
 						? (params as { ids?: unknown }).ids
 						: undefined;
 				if (!Array.isArray(ids) || ids.length === 0) {
-					return error(
-						'Error: summarize_context requires {"ids": ["id1", "id2"]}. First call prune_context with no parameters to list blocks.',
+					throw new Error(
+						'Error: summarize_context requires {"ids": ["id1", "id2"]} with at least one block id. First call list_context with no parameters to list the current blocks.',
 					);
 				}
 				const invalidIds = ids.filter((id) => typeof id !== "string");
 				if (invalidIds.length > 0) {
-					return error(`Error: All ids must be strings. Found invalid ids: ${invalidIds.join(", ")}`);
+					throw new Error(`Error: All ids must be strings. Found invalid ids: ${invalidIds.join(", ")}`);
 				}
 
 				const blocks = groupPruneBlocks(this.sessionManager.buildContextEntries());
@@ -3157,8 +3163,8 @@ export class AgentSession {
 					else unknown.push(id);
 				}
 				if (matched.length === 0) {
-					return error(
-						`No current context blocks matched.${unknown.length > 0 ? ` Unknown id(s): ${unknown.join(", ")}.` : ""}`,
+					throw new Error(
+						`Error: No current context blocks matched.${unknown.length > 0 ? ` Unknown id(s): ${unknown.join(", ")}.` : ""} Call list_context with no parameters to list the current blocks.`,
 					);
 				}
 
@@ -3167,7 +3173,7 @@ export class AgentSession {
 					? this._modelRuntime.getModel(configuredModel.provider, configuredModel.model)
 					: this.model;
 				if (!model) {
-					return error(
+					throw new Error(
 						configuredModel
 							? `Configured summarization model not found: ${configuredModel.provider}/${configuredModel.model}.`
 							: "No active model is available for block summarization.",
@@ -3196,7 +3202,7 @@ export class AgentSession {
 					}
 				} catch (cause) {
 					const message = cause instanceof Error ? cause.message : String(cause);
-					return error(`Block summarization failed; no blocks were changed: ${message}`);
+					throw new Error(`Block summarization failed; no blocks were changed: ${message}`);
 				}
 
 				this._contextStatusLastPercent = null;
@@ -3232,6 +3238,7 @@ export class AgentSession {
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
+		this._baseToolDefinitions.set("list_context", this._createListToolDefinition());
 		this._baseToolDefinitions.set("prune_context", this._createPruneToolDefinition());
 		this._baseToolDefinitions.set("summarize_context", this._createSummarizeToolDefinition());
 
@@ -3260,7 +3267,7 @@ export class AgentSession {
 			: ["read", "bash", "edit", "write"];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
-			activeToolNames: [...baseActiveToolNames, "prune_context", "summarize_context"],
+			activeToolNames: [...baseActiveToolNames, "list_context", "prune_context", "summarize_context"],
 			includeAllExtensionTools: options.includeAllExtensionTools,
 		});
 	}

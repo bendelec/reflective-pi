@@ -8,7 +8,8 @@ lighter-weight alternative to legacy compaction.
 - **Data model + `buildContextEntries` filter**: implemented.
 - **Atomic grouping + preview**: implemented (`packages/coding-agent/src/core/prune.ts`).
 - **TUI `/prune` command**: implemented (`packages/coding-agent/src/modes/interactive/components/prune-selector.ts`).
-- **Agentic self-curation tool** (`prune_context`): implemented (see [Agentic tool](#agentic-tool)).
+- **Agentic self-curation tools** (`list_context`, `prune_context`,
+  `summarize_context`): implemented (see [Agentic tools](#agentic-tools)).
 
 ## Data model (implemented)
 
@@ -75,23 +76,28 @@ Interaction is staged and committed atomically:
 Visibility is filtered client-side from `initialPruned` (the resolved prune
 state of each block), not by rebuilding the entry list.
 
-## Agentic tool
+## Agentic tools
 
-`AgentSession` registers a `prune_context` tool (`agent-session.ts`,
-`_createPruneToolDefinition`) so the model can curate its own context. It is
-always active (appended to the default active-tool list in `_buildRuntime`).
+`AgentSession` registers the context tools (`agent-session.ts`,
+`_createListToolDefinition`, `_createPruneToolDefinition`,
+`_createSummarizeToolDefinition`) so the model can curate its own context. They
+are always active (appended to the default active-tool list in `_buildRuntime`).
 
-Two modes, selected by arguments:
+One verb per tool:
 
-- **List** — called with no parameters, it prints the current context blocks
-  (via `groupPruneBlocks(buildContextEntries())`) with each block's id and
-  preview. The id is the block's first entry id; that id is what prune mode
-  accepts.
-- **Prune** — `{"ids": ["id1", "id2"]}` marks each matched block `"excluded"`
-  via `setPruneState`. Each block is excluded atomically (tool calls stay with
-  their results). Unknown ids are reported but ignored. The agent tool only
-  excludes and cannot restore; session history is retained, and the user can
-  restore blocks via `/prune`.
+- **`list_context`** — read-only, no parameters. Prints the current context
+  blocks (via `groupPruneBlocks(buildContextEntries())`) with each block's id
+  and preview, plus a read-only reminder. The id is the block's first entry id;
+  that id is what the mutating tools accept.
+- **`prune_context`** — `{"ids": ["id1", "id2"]}` marks each matched block
+  `"excluded"` via `setPruneState`. Each block is excluded atomically (tool
+  calls stay with their results). When some ids match and others do not, the
+  matched blocks are excluded and the unknown ids are reported. A bare call, an
+  empty ids array, or ids that match nothing fail with an error result pointing
+  at `list_context`. The agent tool only excludes and cannot restore; session
+  history is retained, and the user can restore blocks via `/prune`.
+- **`summarize_context`** — `{"ids": [...]}` replaces each matched block with
+  a model-generated summary (see `reflective-context.md`).
 
 After pruning, the tool clears the cached context-status percent baseline and
 forces a context-status message on the next turn so the user can verify the

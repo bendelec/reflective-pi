@@ -440,6 +440,7 @@ ${chalk.bold("Built-in Tool Names:")}
   powershell - Execute PowerShell commands on Windows
   edit       - Edit files with find/replace
   write      - Write files (creates/overwrites)
+  list_context - List context blocks with ids and previews (read-only)
   prune_context - Exclude context blocks that no longer matter for future work
   summarize_context - Replace context blocks with concise summaries
   grep       - Search file contents (read-only, off by default)

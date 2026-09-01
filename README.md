@@ -39,7 +39,7 @@ We implement two mechanisms to enable this:
 
 * "context-status" messages are injected into the chat at certain points (at least once every 10% of context 
   used, and more frequently in certain high-pressure situations) to allow the model to track the context situation.
-* A prune_context() tool is available to the model to list and exclude stale context blocks.
+* Agent-facing `list_context`, `prune_context`, and `summarize_context` tools let the model inspect, exclude, and summarize stale context blocks.
 
 We also added a /prune TUI command for the user to control context (and to restore blocks the agent model 
 erroneously deleted).
@@ -59,7 +59,7 @@ Current observations are tracked in [Reflective context evaluation results](pack
 Adding manual summary requests to `/prune`. Blocks can now be replaced by concise summaries through the
 agent-facing `summarize_context` tool, but the selector currently supports only displaying and restoring them.
 
-Tracking context use for each message during the session and storing it with the session tree, so that the prune_context
+Tracking context use for each message during the session and storing it with the session tree, so that the list_context
 tool can preview the correct number of tokens gained by pruning each block (better decision making input for the model)
 
 Making the pruning branch-scoped in pi's tree. Current implementation of the tree in pi doesn't have branch labels/tags

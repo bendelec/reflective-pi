@@ -68,6 +68,7 @@ describe("defaultTools setting", () => {
 			"edit",
 			"find",
 			"grep",
+			"list_context",
 			"ls",
 			"powershell",
 			"prune_context",
@@ -75,7 +76,13 @@ describe("defaultTools setting", () => {
 			"summarize_context",
 			"write",
 		]);
-		expect(session.getActiveToolNames()).toEqual(["grep", "find", "prune_context", "summarize_context"]);
+		expect(session.getActiveToolNames()).toEqual([
+			"grep",
+			"find",
+			"list_context",
+			"prune_context",
+			"summarize_context",
+		]);
 		expect(session.systemPrompt).toContain("- grep:");
 		expect(session.systemPrompt).not.toContain("- read:");
 		session.dispose();
@@ -89,6 +96,7 @@ describe("defaultTools setting", () => {
 			"powershell",
 			"edit",
 			"write",
+			"list_context",
 			"prune_context",
 			"summarize_context",
 		]);
@@ -137,6 +145,7 @@ describe("defaultTools setting", () => {
 		expect(session.getActiveToolNames().sort()).toEqual([
 			"dynamic_tool",
 			"grep",
+			"list_context",
 			"prune_context",
 			"sdk_tool",
 			"static_tool",
@@ -154,7 +163,12 @@ describe("defaultTools setting", () => {
 		allowlistedSession.dispose();
 
 		const excludedSession = await createSession(["read", "grep"], { excludeTools: ["read"] });
-		expect(excludedSession.getActiveToolNames()).toEqual(["grep", "prune_context", "summarize_context"]);
+		expect(excludedSession.getActiveToolNames()).toEqual([
+			"grep",
+			"list_context",
+			"prune_context",
+			"summarize_context",
+		]);
 		excludedSession.dispose();
 
 		const toolLessSession = await createSession(["read"], { noTools: "all" });
@@ -182,6 +196,7 @@ describe("defaultTools setting", () => {
 			"edit",
 			"find",
 			"grep",
+			"list_context",
 			"ls",
 			"powershell",
 			"prune_context",
@@ -189,7 +204,7 @@ describe("defaultTools setting", () => {
 			"summarize_context",
 			"write",
 		]);
-		expect(session.getActiveToolNames()).toEqual(["ls", "prune_context", "summarize_context"]);
+		expect(session.getActiveToolNames()).toEqual(["ls", "list_context", "prune_context", "summarize_context"]);
 		session.dispose();
 	});
 });

@@ -101,6 +101,14 @@ describe("AgentSession setPruneState", () => {
 		// The first user message ("hello") is pruned from the live context.
 		const hello = harness.session.messages.find((m) => m.role === "user" && m.content === "hello");
 		expect(hello).toBeUndefined();
+
+		// The success result is factual: what was pruned and how much remains.
+		const result = harness.session.messages.find((m) => m.role === "toolResult");
+		expect(result).toBeDefined();
+		expect(result!.isError).toBe(false);
+		const text = result!.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+		expect(text).toContain("Pruned 1 block(s).");
+		expect(text).toContain("block(s) remain.");
 	});
 
 	it("falls back to the active model when no summary model is configured", async () => {
@@ -153,7 +161,7 @@ describe("AgentSession setPruneState", () => {
 		);
 	});
 
-	it("lists blocks with ids via prune_context without arguments", async () => {
+	it("lists blocks with ids via list_context", async () => {
 		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
 		harness.setResponses([fauxAssistantMessage("hello back")]);
 		await harness.session.prompt("hello");
@@ -161,17 +169,87 @@ describe("AgentSession setPruneState", () => {
 		const user = userEntryId(harness);
 
 		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("prune_context", {})], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxToolCall("list_context", {})], { stopReason: "toolUse" }),
 			fauxAssistantMessage("done"),
 		]);
 		await harness.session.prompt("list blocks");
 
-		// The tool result should list the user block id and its preview.
+		// The tool result lists the user block id, its preview, and the read-only note.
 		const result = harness.session.messages.find((m) => m.role === "toolResult");
 		expect(result).toBeDefined();
+		expect(result!.isError).toBe(false);
 		const text = result!.content.map((c) => (c.type === "text" ? c.text : "")).join("");
 		expect(text).toContain(user);
 		expect(text).toContain("user: hello");
+		expect(text).toContain("Listing is read-only");
+	});
+
+	it("registers list_context as a read-only zero-parameter tool", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		const definition = harness.session.getToolDefinition("list_context");
+		expect(definition).toBeDefined();
+		expect(definition!.parameters).toMatchObject({ type: "object", properties: {} });
+		expect(definition!.description).toContain("no parameters");
+	});
+
+	it("errors when prune_context is called without ids", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		harness.setResponses([fauxAssistantMessage("hello back")]);
+		await harness.session.prompt("hello");
+
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("prune_context", {})], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		await harness.session.prompt("prune without ids");
+
+		// A mutating tool must fail loudly when the mutation payload is missing.
+		const result = harness.session.messages.find((m) => m.role === "toolResult");
+		expect(result).toBeDefined();
+		expect(result!.isError).toBe(true);
+		const text = result!.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+		expect(text).toContain("Error: prune_context requires");
+		expect(text).toContain("Call list_context");
+	});
+
+	it("errors when prune_context is called with an empty ids array", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		harness.setResponses([fauxAssistantMessage("hello back")]);
+		await harness.session.prompt("hello");
+
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("prune_context", { ids: [] })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		await harness.session.prompt("prune with empty ids");
+
+		const result = harness.session.messages.find((m) => m.role === "toolResult");
+		expect(result).toBeDefined();
+		expect(result!.isError).toBe(true);
+		const text = result!.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+		expect(text).toContain("Error: prune_context requires");
+		expect(text).toContain("Call list_context");
+	});
+
+	it("errors when no blocks match the given ids", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		harness.setResponses([fauxAssistantMessage("hello back")]);
+		await harness.session.prompt("hello");
+
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("prune_context", { ids: ["does-not-exist"] })], {
+				stopReason: "toolUse",
+			}),
+			fauxAssistantMessage("done"),
+		]);
+		await harness.session.prompt("prune unknown id");
+
+		const result = harness.session.messages.find((m) => m.role === "toolResult");
+		expect(result).toBeDefined();
+		expect(result!.isError).toBe(true);
+		const text = result!.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+		expect(text).toContain("No current context blocks matched");
+		expect(text).toContain("does-not-exist");
 	});
 
 	it("frames context hygiene as a quality requirement in the system prompt", async () => {
@@ -201,8 +279,8 @@ describe("AgentSession setPruneState", () => {
 	it("spells out the list-then-prune workflow in the tool description", async () => {
 		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
 		const description = harness.session.getToolDefinition("prune_context")?.description ?? "";
-		expect(description).toContain("list the current blocks");
-		expect(description).toContain("exclude selected blocks");
+		expect(description).toContain("Call list_context");
+		expect(description).toContain("exclude the selected blocks");
 		// The agent tool only excludes; restoration is via the user's /prune command.
 		expect(description).toContain("cannot restore blocks");
 		expect(description).toContain("/prune");
@@ -228,9 +306,10 @@ describe("AgentSession setPruneState", () => {
 
 		const result = harness.session.messages.find((m) => m.role === "toolResult");
 		expect(result).toBeDefined();
+		expect(result!.isError).toBe(true);
 		const text = result!.content.map((c) => (c.type === "text" ? c.text : "")).join("");
-		expect(text).toContain("Error: Invalid parameters");
-		expect(text).toContain("no parameters to list");
+		expect(text).toContain("Error: prune_context requires");
+		expect(text).toContain("Call list_context");
 	});
 
 	it("returns error when ids is not an array", async () => {
