@@ -34,6 +34,25 @@ describe("AgentSession setPruneState", () => {
 		expect(harness.sessionManager.getPruneState(id)).toBe("excluded");
 	});
 
+	it("replaces an atomic block with a persisted summary", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		harness.setResponses([fauxAssistantMessage("hello back")]);
+		await harness.session.prompt("hello");
+
+		const id = userEntryId(harness);
+		harness.session.setBlockSummary([id], "The user started the greeting task.");
+
+		expect(harness.sessionManager.getPruneState(id)).toBe("summarized");
+		expect(harness.sessionManager.getPruneSummary(id)).toBe("The user started the greeting task.");
+		expect(harness.session.messages).toMatchObject([
+			{
+				role: "custom",
+				content: "[Summary of previously summarized context block]\nThe user started the greeting task.",
+			},
+			{ role: "assistant" },
+		]);
+	});
+
 	it("restores entries on unprune", async () => {
 		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
 		harness.setResponses([fauxAssistantMessage("hello back")]);
@@ -82,6 +101,56 @@ describe("AgentSession setPruneState", () => {
 		// The first user message ("hello") is pruned from the live context.
 		const hello = harness.session.messages.find((m) => m.role === "user" && m.content === "hello");
 		expect(hello).toBeUndefined();
+	});
+
+	it("falls back to the active model when no summary model is configured", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		harness.setResponses([fauxAssistantMessage("hello back")]);
+		await harness.session.prompt("hello");
+
+		const user = userEntryId(harness);
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("summarize_context", { ids: [user] })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("The active model summarized the greeting task."),
+			fauxAssistantMessage("done"),
+		]);
+		await harness.session.prompt("summarize the first message");
+
+		expect(harness.sessionManager.getPruneState(user)).toBe("summarized");
+		expect(harness.sessionManager.getPruneSummary(user)).toBe("The active model summarized the greeting task.");
+	});
+
+	it("summarizes a selected block with the configured secondary model", async () => {
+		const harness = track(
+			await createHarness({
+				models: [
+					{ id: "agent-model", contextWindow: 1000 },
+					{ id: "summary-model", contextWindow: 1000 },
+				],
+				settings: {
+					reflectiveContext: { summarizationModel: { provider: "faux", model: "summary-model" } },
+				},
+			}),
+		);
+		harness.setResponses([fauxAssistantMessage("hello back")]);
+		await harness.session.prompt("hello");
+
+		const user = userEntryId(harness);
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("summarize_context", { ids: [user] })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("The user opened the greeting task."),
+			fauxAssistantMessage("done"),
+		]);
+		await harness.session.prompt("summarize the first message");
+
+		expect(harness.sessionManager.getPruneState(user)).toBe("summarized");
+		expect(harness.sessionManager.getPruneSummary(user)).toBe("The user opened the greeting task.");
+		expect(harness.session.messages).toContainEqual(
+			expect.objectContaining({
+				role: "custom",
+				content: "[Summary of previously summarized context block]\nThe user opened the greeting task.",
+			}),
+		);
 	});
 
 	it("lists blocks with ids via prune_context without arguments", async () => {

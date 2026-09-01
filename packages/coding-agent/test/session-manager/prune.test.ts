@@ -146,16 +146,38 @@ describe("SessionManager prune markers", () => {
 		expect(pruneEntry.state).toBe("excluded");
 	});
 
+	it("replaces a summarized message with its persisted context summary", () => {
+		const session = SessionManager.inMemory();
+		const msgId = session.appendMessage({ role: "user", content: "full original context", timestamp: 1 });
+		session.appendMessage(assistantMessage("follow-up", 2));
+
+		session.appendPruneChange(msgId, "summarized", "The original request established the API boundary.");
+
+		expect(session.getPruneState(msgId)).toBe("summarized");
+		expect(session.getPruneSummary(msgId)).toBe("The original request established the API boundary.");
+		expect(session.buildContextEntries().map((entry) => entry.id)).not.toContain(msgId);
+		expect(session.buildSessionContext().messages).toMatchObject([
+			{
+				role: "custom",
+				content:
+					"[Summary of previously summarized context block]\nThe original request established the API boundary.",
+			},
+			{ role: "assistant" },
+		]);
+	});
+
 	it("restores with included", () => {
 		const session = SessionManager.inMemory();
 
 		const msgId = session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
 
-		session.appendPruneChange(msgId, "excluded");
-		expect(session.getPruneState(msgId)).toBe("excluded");
+		session.appendPruneChange(msgId, "summarized", "summary");
+		expect(session.getPruneState(msgId)).toBe("summarized");
 
 		session.appendPruneChange(msgId, "included");
 		expect(session.getPruneState(msgId)).toBeUndefined();
+		expect(session.getPruneSummary(msgId)).toBeUndefined();
+		expect(session.buildSessionContext().messages.map((m) => m.role)).toEqual(["user"]);
 	});
 
 	it("last prune marker wins", () => {
@@ -213,6 +235,24 @@ describe("SessionManager prune markers", () => {
 		expect(session.buildSessionContext().messages.map((message) => message.role)).toEqual(["user"]);
 	});
 
+	it("preserves a summarized block when extracting a sibling branch", () => {
+		const session = SessionManager.inMemory();
+		const rootId = session.appendMessage({ role: "user", content: "full original request", timestamp: 1 });
+		session.appendMessage({ role: "user", content: "first branch", timestamp: 2 });
+		session.appendPruneChange(rootId, "summarized", "Original request summary.");
+
+		session.branch(rootId);
+		const siblingLeafId = session.appendMessage({ role: "user", content: "sibling branch", timestamp: 3 });
+		session.createBranchedSession(siblingLeafId);
+
+		expect(session.getPruneState(rootId)).toBe("summarized");
+		expect(session.getPruneSummary(rootId)).toBe("Original request summary.");
+		expect(session.buildSessionContext().messages).toMatchObject([
+			{ role: "custom", content: "[Summary of previously summarized context block]\nOriginal request summary." },
+			{ role: "user", content: "sibling branch" },
+		]);
+	});
+
 	it("prune entries themselves are not projected into context", () => {
 		const session = SessionManager.inMemory();
 
@@ -245,16 +285,21 @@ describe("SessionManager prune persistence", () => {
 		const msg1 = session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
 		session.appendMessage(assistantMessage("hi", 2));
 		const msg3 = session.appendMessage({ role: "user", content: "followup", timestamp: 3 });
-		session.appendPruneChange(msg1, "excluded");
+		session.appendPruneChange(msg1, "summarized", "hello summary");
 
 		const file = session.getSessionFile();
 		expect(file).toBeDefined();
 
 		const reopened = SessionManager.open(file!);
-		expect(reopened.getPruneState(msg1)).toBe("excluded");
+		expect(reopened.getPruneState(msg1)).toBe("summarized");
+		expect(reopened.getPruneSummary(msg1)).toBe("hello summary");
 		expect(reopened.getPruneState(msg3)).toBeUndefined();
 
 		const ctx = reopened.buildSessionContext();
-		expect(ctx.messages.map((m) => m.role)).toEqual(["assistant", "user"]);
+		expect(ctx.messages).toMatchObject([
+			{ role: "custom", content: "[Summary of previously summarized context block]\nhello summary" },
+			{ role: "assistant" },
+			{ role: "user", content: "followup" },
+		]);
 	});
 });

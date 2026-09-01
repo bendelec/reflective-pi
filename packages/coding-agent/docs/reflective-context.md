@@ -97,6 +97,38 @@ operates in. The agent tool only ever *excludes*. Restoring a block (flipping
 its state back to `"included"`) is done from the `/prune` TUI, not by the agent
 tool (see below).
 
+## `summarize_context` — retain the essential part of a block
+
+`summarize_context` is a separate agent tool for blocks whose full text is no
+longer useful but whose essential result may matter later. The normal workflow
+is to first list current blocks with `prune_context`, then call
+`summarize_context` with one or more reported IDs. Each selected atomic block is
+sent independently to the configured summary model. rxpi appends a
+`"summarized"` prune marker for every entry in that block; only the marker for
+the block's first entry stores the generated replacement text.
+
+When building the next model context, rxpi omits the original entries and
+inserts that replacement text at the block's original chronological position.
+A subsequent `"included"` marker restores the original block and suppresses the
+replacement. A failed request changes no selected blocks.
+
+Block summarization uses the currently selected agent model by default. To use a
+faster or cheaper secondary model instead, configure it in `settings.json`:
+
+```json
+{
+  "reflectiveContext": {
+    "summarizationModel": {
+      "provider": "provider-id",
+      "model": "model-id"
+    }
+  }
+}
+```
+
+This setting affects block summarization only. It does not change Pi's manual
+or automatic compaction behavior.
+
 ## `/prune` — optional user control
 
 For users who want direct control, `rxpi` also ships a `/prune` command that
@@ -107,11 +139,13 @@ opens a selector over the same blocks:
 - `Enter` commits all staged changes atomically, `Escape`/`Ctrl+C` aborts;
 - `Ctrl+A` toggles between "included only" and "show all" views.
 
-The "show all" view is where pruned blocks appear (marked `[pruned]`) and can be
-restored — toggled back to `"included"` — since the same selector stages changes
-in both directions. This is a convenience on top of the agentic tool, not the
-primary mechanism: the model can curate its context without the user, and the
-user can review or reverse that curation here.
+The "show all" view is where excluded blocks appear as `[pruned]` and summarized
+blocks appear as `[summarized]`. Either can be restored by toggling it back to
+`"included"`. The selector does not yet initiate new summaries; it is the
+review and restoration interface for agent-generated summaries. This is a
+convenience on top of the agentic tools, not the primary mechanism: the model
+can curate its context without the user, and the user can review or reverse
+that curation here.
 
 ## Planned follow-up work
 
@@ -120,8 +154,8 @@ context curation improves results, the planned follow-up work is:
 
 - **Per-block token accounting or previews.** The prune UI does not yet show
   token counts per block or estimate freed tokens.
-- **A `"summarized"` prune state.** A pruned block is currently either excluded
-  or included; there is no mini-summary replacement yet.
+- **Manual summary requests in `/prune`.** The selector can display and restore
+  summarized blocks, but cannot yet create them.
 
 Per-turn status insertion is not planned. Threshold-triggered status messages
 are intentional: they provide useful awareness without creating noise or forcing

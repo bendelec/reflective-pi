@@ -2094,6 +2094,7 @@ export class InteractiveMode {
 				this.shutdownRequested = true;
 			},
 			getContextUsage: () => this.session.getContextUsage(),
+			getReflectiveContextSummarizationModel: () => this.settingsManager.getReflectiveContextSummarizationModel(),
 			compact: (options) => {
 				void (async () => {
 					try {

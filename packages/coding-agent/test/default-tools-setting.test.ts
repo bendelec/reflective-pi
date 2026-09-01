@@ -63,8 +63,8 @@ describe("defaultTools setting", () => {
 				.getAllTools()
 				.map((tool) => tool.name)
 				.sort(),
-		).toEqual(["bash", "edit", "find", "grep", "ls", "prune_context", "read", "write"]);
-		expect(session.getActiveToolNames()).toEqual(["grep", "find", "prune_context"]);
+		).toEqual(["bash", "edit", "find", "grep", "ls", "prune_context", "read", "summarize_context", "write"]);
+		expect(session.getActiveToolNames()).toEqual(["grep", "find", "prune_context", "summarize_context"]);
 		expect(session.systemPrompt).toContain("- grep:");
 		expect(session.systemPrompt).not.toContain("- read:");
 		session.dispose();
@@ -113,6 +113,7 @@ describe("defaultTools setting", () => {
 			"prune_context",
 			"sdk_tool",
 			"static_tool",
+			"summarize_context",
 		]);
 		expect(session.getAllTools().map((tool) => tool.name)).toEqual(
 			expect.arrayContaining(["read", "dynamic_tool", "sdk_tool", "static_tool"]),
@@ -126,7 +127,7 @@ describe("defaultTools setting", () => {
 		allowlistedSession.dispose();
 
 		const excludedSession = await createSession(["read", "grep"], { excludeTools: ["read"] });
-		expect(excludedSession.getActiveToolNames()).toEqual(["grep", "prune_context"]);
+		expect(excludedSession.getActiveToolNames()).toEqual(["grep", "prune_context", "summarize_context"]);
 		excludedSession.dispose();
 
 		const toolLessSession = await createSession(["read"], { noTools: "all" });
@@ -149,8 +150,8 @@ describe("defaultTools setting", () => {
 				.getAllTools()
 				.map((tool) => tool.name)
 				.sort(),
-		).toEqual(["bash", "edit", "find", "grep", "ls", "prune_context", "read", "write"]);
-		expect(session.getActiveToolNames()).toEqual(["ls", "prune_context"]);
+		).toEqual(["bash", "edit", "find", "grep", "ls", "prune_context", "read", "summarize_context", "write"]);
+		expect(session.getActiveToolNames()).toEqual(["ls", "prune_context", "summarize_context"]);
 		session.dispose();
 	});
 });

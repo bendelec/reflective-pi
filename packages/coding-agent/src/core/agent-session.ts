@@ -53,6 +53,7 @@ import { sleep } from "../utils/sleep.ts";
 import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
+import { summarizeBlock } from "./block-summarization.ts";
 import {
 	type CompactionPreparation,
 	type CompactionResult,
@@ -1969,6 +1970,15 @@ export class AgentSession {
 		this._pruneHappenedThisTurn = true;
 	}
 
+	/** Replace one atomic context block with a persisted summary. */
+	setBlockSummary(entryIds: readonly string[], summary: string): void {
+		for (const [index, entryId] of entryIds.entries()) {
+			this.sessionManager.appendPruneChange(entryId, "summarized", index === 0 ? summary : undefined);
+		}
+		this.agent.state.messages = this.sessionManager.buildSessionContext().messages;
+		this._pruneHappenedThisTurn = true;
+	}
+
 	// =========================================================================
 	// Compaction
 	// =========================================================================
@@ -2714,6 +2724,7 @@ export class AgentSession {
 					this._extensionShutdownHandler?.();
 				},
 				getContextUsage: () => this.getContextUsage(),
+				getReflectiveContextSummarizationModel: () => this.settingsManager.getReflectiveContextSummarizationModel(),
 				compact: (options) => {
 					void (async () => {
 						try {
@@ -3013,6 +3024,115 @@ export class AgentSession {
 		};
 	}
 
+	/** Create the session-aware `summarize_context` tool. */
+	private _createSummarizeToolDefinition(): ToolDefinition {
+		const schema = Type.Object({ ids: Type.Array(Type.String(), { minItems: 1 }) });
+		const error = (text: string) => ({ content: [{ type: "text" as const, text }], details: {} });
+
+		return {
+			name: "summarize_context",
+			label: "Summarize Context",
+			description:
+				'Replace selected context blocks with concise summaries. First call prune_context with no parameters to list the current blocks and ids. Then call summarize_context with {"ids": ["id1", "id2"]}. Each selected atomic block is summarized independently and can be restored with /prune.',
+			promptSnippet: "Replace selected context blocks with concise summaries.",
+			promptGuidelines: [
+				"First use prune_context to inspect the current blocks, then use summarize_context for blocks whose essential information may still help later but whose full text is no longer worth retaining.",
+				"Use prune_context instead when a block has no likely future value. Summarized blocks can be restored by the user with /prune.",
+			],
+			parameters: schema,
+			prepareArguments: (params) => {
+				if (!params || typeof params !== "object" || Array.isArray(params)) return params as { ids?: string[] };
+				const ids = (params as { ids?: unknown }).ids;
+				if (typeof ids === "string") {
+					try {
+						return { ...params, ids: JSON.parse(ids) } as { ids?: string[] };
+					} catch {
+						return params as { ids?: string[] };
+					}
+				}
+				return params as { ids?: string[] };
+			},
+			execute: async (_toolCallId, params) => {
+				const ids =
+					params && typeof params === "object" && !Array.isArray(params)
+						? (params as { ids?: unknown }).ids
+						: undefined;
+				if (!Array.isArray(ids) || ids.length === 0) {
+					return error(
+						'Error: summarize_context requires {"ids": ["id1", "id2"]}. First call prune_context with no parameters to list blocks.',
+					);
+				}
+				const invalidIds = ids.filter((id) => typeof id !== "string");
+				if (invalidIds.length > 0) {
+					return error(`Error: All ids must be strings. Found invalid ids: ${invalidIds.join(", ")}`);
+				}
+
+				const blocks = groupPruneBlocks(this.sessionManager.buildContextEntries());
+				const blockById = new Map<string, PruneBlock>(blocks.map((block) => [block.entryIds[0]!, block]));
+				const matched: PruneBlock[] = [];
+				const unknown: string[] = [];
+				const seen = new Set<string>();
+				for (const rawId of ids) {
+					const id = rawId.trim();
+					if (!id || seen.has(id)) continue;
+					seen.add(id);
+					const block = blockById.get(id);
+					if (block) matched.push(block);
+					else unknown.push(id);
+				}
+				if (matched.length === 0) {
+					return error(
+						`No current context blocks matched.${unknown.length > 0 ? ` Unknown id(s): ${unknown.join(", ")}.` : ""}`,
+					);
+				}
+
+				const configuredModel = this.settingsManager.getReflectiveContextSummarizationModel();
+				const model = configuredModel
+					? this._modelRuntime.getModel(configuredModel.provider, configuredModel.model)
+					: this.model;
+				if (!model) {
+					return error(
+						configuredModel
+							? `Configured summarization model not found: ${configuredModel.provider}/${configuredModel.model}.`
+							: "No active model is available for block summarization.",
+					);
+				}
+
+				try {
+					const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(model);
+					const summaries: Array<{ block: PruneBlock; summary: string }> = [];
+					for (const block of matched) {
+						summaries.push({
+							block,
+							summary: await summarizeBlock({
+								block,
+								model: requestModel,
+								apiKey,
+								headers,
+								env,
+								streamFn: this.agent.streamFunction,
+								retry: this.settingsManager.getRetrySettings(),
+							}),
+						});
+					}
+					for (const { block, summary } of summaries) {
+						this.setBlockSummary(block.entryIds, summary);
+					}
+				} catch (cause) {
+					const message = cause instanceof Error ? cause.message : String(cause);
+					return error(`Block summarization failed; no blocks were changed: ${message}`);
+				}
+
+				this._contextStatusLastPercent = null;
+				this._contextStatusForceNext = true;
+				const lines = [`Summarized ${matched.length} block(s).`];
+				for (const block of matched) lines.push(`  - ${previewBlock(block).line}`);
+				if (unknown.length > 0) lines.push(`Unknown id(s): ${unknown.join(", ")}.`);
+				return { content: [{ type: "text", text: lines.join("\n") }], details: {} };
+			},
+		};
+	}
+
 	private _buildRuntime(options: {
 		activeToolNames?: string[];
 		flagValues?: Map<string, boolean | string>;
@@ -3037,6 +3157,7 @@ export class AgentSession {
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
 		this._baseToolDefinitions.set("prune_context", this._createPruneToolDefinition());
+		this._baseToolDefinitions.set("summarize_context", this._createSummarizeToolDefinition());
 
 		const extensionsResult = this._resourceLoader.getExtensions();
 		if (options.flagValues) {
@@ -3063,7 +3184,7 @@ export class AgentSession {
 			: ["read", "bash", "edit", "write"];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
-			activeToolNames: [...baseActiveToolNames, "prune_context"],
+			activeToolNames: [...baseActiveToolNames, "prune_context", "summarize_context"],
 			includeAllExtensionTools: options.includeAllExtensionTools,
 		});
 	}

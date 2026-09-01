@@ -440,6 +440,7 @@ ${chalk.bold("Built-in Tool Names:")}
   edit   - Edit files with find/replace
   write  - Write files (creates/overwrites)
   prune_context - Exclude context blocks that no longer matter for future work
+  summarize_context - Replace context blocks with concise summaries
   grep   - Search file contents (read-only, off by default)
   find   - Find files by glob pattern (read-only, off by default)
   ls     - List directory contents (read-only, off by default)

@@ -119,21 +119,23 @@ export interface LabelEntry extends SessionEntryBase {
  * Per-message context-inclusion state. Latest-wins; resolved in _buildIndex.
  *
  * "excluded" removes the message from context (pruned). "included" is the
- * default (absence from the resolved map). "summarized" will be added later;
- * it marks a message as replaced by a group summary entry.
+ * default (absence from the resolved map). "summarized" replaces an atomic
+ * context block with its persisted summary.
  *
  * NOTE: prune markers are currently GLOBAL (not branch-scoped). This is a
  * temporary limitation. When the session layer migrates to harness-v2 lanes,
  * prune markers will gain a branchId and become per-lane. Do not build
  * branch-specific behavior on this.
  */
-export type PruneState = "included" | "excluded";
+export type PruneState = "included" | "excluded" | "summarized";
 
-/** Entry recording a prune/unprune marker on a target message entry. */
+/** Entry recording a context-inclusion marker on a target message entry. */
 export interface PruneEntry extends SessionEntryBase {
 	type: "prune";
 	targetId: string;
 	state: PruneState;
+	/** Replacement text when state is "summarized"; stored only on the block's first entry. */
+	summary?: string;
 }
 
 /** Session metadata entry (e.g., user-defined display name). */
@@ -480,7 +482,10 @@ export function buildContextEntries(
 	// unfiltered path: a pruned compaction entry still truncates history, its
 	// summary is merely omitted from the result.
 	if (pruneStateById && pruneStateById.size > 0) {
-		contextEntries = contextEntries.filter((entry) => pruneStateById.get(entry.id) !== "excluded");
+		contextEntries = contextEntries.filter((entry) => {
+			const state = pruneStateById.get(entry.id);
+			return state !== "excluded" && state !== "summarized";
+		});
 	}
 
 	return contextEntries;
@@ -496,10 +501,32 @@ export function buildSessionContext(
 	leafId?: string | null,
 	byId?: Map<string, SessionEntry>,
 	pruneStateById?: ReadonlyMap<string, PruneState>,
+	pruneSummaryById?: ReadonlyMap<string, string>,
 ): SessionContext {
 	const path = buildSessionPath(entries, leafId, byId);
 	const { thinkingLevel, model } = getSessionContextSettings(path);
-	const messages = buildContextEntries(entries, leafId, byId, pruneStateById).flatMap(sessionEntryToContextMessages);
+	const contextEntries = buildContextEntries(entries, leafId, byId);
+	const messages: AgentMessage[] = [];
+	for (const entry of contextEntries) {
+		const state = pruneStateById?.get(entry.id);
+		if (state === "excluded") continue;
+		if (state === "summarized" && pruneSummaryById) {
+			const summary = pruneSummaryById.get(entry.id);
+			if (summary) {
+				messages.push(
+					createCustomMessage(
+						"context_summary",
+						`[Summary of previously summarized context block]\n${summary}`,
+						false,
+						undefined,
+						entry.timestamp,
+					),
+				);
+			}
+			continue;
+		}
+		messages.push(...sessionEntryToContextMessages(entry));
+	}
 	return { messages, thinkingLevel, model };
 }
 
@@ -898,6 +925,7 @@ export class SessionManager {
 	private labelsById: Map<string, string> = new Map();
 	private labelTimestampsById: Map<string, string> = new Map();
 	private pruneStateById: Map<string, PruneState> = new Map();
+	private pruneSummaryById: Map<string, string> = new Map();
 	private leafId: string | null = null;
 
 	private constructor(
@@ -981,6 +1009,7 @@ export class SessionManager {
 		this.labelsById.clear();
 		this.labelTimestampsById.clear();
 		this.pruneStateById.clear();
+		this.pruneSummaryById.clear();
 		this.leafId = null;
 		this.flushed = false;
 
@@ -996,6 +1025,7 @@ export class SessionManager {
 		this.labelsById.clear();
 		this.labelTimestampsById.clear();
 		this.pruneStateById.clear();
+		this.pruneSummaryById.clear();
 		this.leafId = null;
 		for (const entry of this.fileEntries) {
 			if (entry.type === "session") continue;
@@ -1010,11 +1040,17 @@ export class SessionManager {
 					this.labelTimestampsById.delete(entry.targetId);
 				}
 			} else if (entry.type === "prune") {
-				// "included" (unprune) restores the default; store only non-default states.
+				// "included" restores the default; store only non-default states.
 				if (entry.state === "included") {
 					this.pruneStateById.delete(entry.targetId);
+					this.pruneSummaryById.delete(entry.targetId);
 				} else {
 					this.pruneStateById.set(entry.targetId, entry.state);
+					if (entry.state === "summarized" && entry.summary) {
+						this.pruneSummaryById.set(entry.targetId, entry.summary);
+					} else {
+						this.pruneSummaryById.delete(entry.targetId);
+					}
 				}
 			}
 		}
@@ -1284,6 +1320,11 @@ export class SessionManager {
 		return this.pruneStateById;
 	}
 
+	/** Return the persisted replacement summary for a summarized block's first entry. */
+	getPruneSummary(id: string): string | undefined {
+		return this.pruneSummaryById.get(id);
+	}
+
 	/**
 	 * Set or clear a label on an entry.
 	 * Labels are user-defined markers for bookmarking/navigation.
@@ -1313,11 +1354,12 @@ export class SessionManager {
 	}
 
 	/**
-	 * Set or clear a prune marker on an entry.
-	 * "excluded" removes the entry from context; "included" restores it.
+	 * Set or clear a context-inclusion marker on an entry.
+	 * "excluded" removes the entry, "included" restores it, and "summarized"
+	 * replaces it with summary text when one is provided.
 	 * Global (not branch-scoped) — see PruneState.
 	 */
-	appendPruneChange(targetId: string, state: PruneState): string {
+	appendPruneChange(targetId: string, state: PruneState, summary?: string): string {
 		if (!this.byId.has(targetId)) {
 			throw new Error(`Entry ${targetId} not found`);
 		}
@@ -1328,12 +1370,19 @@ export class SessionManager {
 			timestamp: new Date().toISOString(),
 			targetId,
 			state,
+			...(summary ? { summary } : {}),
 		};
 		this._appendEntry(entry);
 		if (state === "included") {
 			this.pruneStateById.delete(targetId);
+			this.pruneSummaryById.delete(targetId);
 		} else {
 			this.pruneStateById.set(targetId, state);
+			if (state === "summarized" && summary) {
+				this.pruneSummaryById.set(targetId, summary);
+			} else {
+				this.pruneSummaryById.delete(targetId);
+			}
 		}
 		return entry.id;
 	}
@@ -1377,7 +1426,7 @@ export class SessionManager {
 	 * Uses tree traversal from current leaf.
 	 */
 	buildSessionContext(): SessionContext {
-		return buildSessionContext(this.getEntries(), this.leafId, this.byId, this.pruneStateById);
+		return buildSessionContext(this.getEntries(), this.leafId, this.byId, this.pruneStateById, this.pruneSummaryById);
 	}
 
 	/**
@@ -1547,7 +1596,7 @@ export class SessionManager {
 		}
 
 		// Collect prune states for entries in the path
-		const prunesToWrite: Array<{ targetId: string; state: PruneState; timestamp: string }> = [];
+		const prunesToWrite: Array<{ targetId: string; state: PruneState; timestamp: string; summary?: string }> = [];
 		for (const [targetId, state] of this.pruneStateById) {
 			if (!pathEntryIds.has(targetId)) continue;
 
@@ -1556,7 +1605,7 @@ export class SessionManager {
 			for (let i = this.fileEntries.length - 1; i >= 0; i--) {
 				const entry = this.fileEntries[i];
 				if (entry.type === "prune" && entry.targetId === targetId) {
-					prunesToWrite.push({ targetId, state, timestamp: entry.timestamp });
+					prunesToWrite.push({ targetId, state, timestamp: entry.timestamp, summary: entry.summary });
 					break;
 				}
 			}
@@ -1582,7 +1631,7 @@ export class SessionManager {
 			}
 
 			const pruneEntries: PruneEntry[] = [];
-			for (const { targetId, state, timestamp: pruneTimestamp } of prunesToWrite) {
+			for (const { targetId, state, timestamp: pruneTimestamp, summary } of prunesToWrite) {
 				const pruneEntry: PruneEntry = {
 					type: "prune",
 					id: generateId(new Set(pathEntryIds)),
@@ -1590,6 +1639,7 @@ export class SessionManager {
 					timestamp: pruneTimestamp,
 					targetId,
 					state,
+					...(summary ? { summary } : {}),
 				};
 				pathEntryIds.add(pruneEntry.id);
 				pruneEntries.push(pruneEntry);
@@ -1634,7 +1684,7 @@ export class SessionManager {
 		}
 
 		const pruneEntries: PruneEntry[] = [];
-		for (const { targetId, state, timestamp: pruneTimestamp } of prunesToWrite) {
+		for (const { targetId, state, timestamp: pruneTimestamp, summary } of prunesToWrite) {
 			const pruneEntry: PruneEntry = {
 				type: "prune",
 				id: generateId(
@@ -1644,6 +1694,7 @@ export class SessionManager {
 				timestamp: pruneTimestamp,
 				targetId,
 				state,
+				...(summary ? { summary } : {}),
 			};
 			pruneEntries.push(pruneEntry);
 			parentId = pruneEntry.id;

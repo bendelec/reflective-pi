@@ -28,8 +28,8 @@ export interface PruneChange {
 class PruneList implements Component {
 	private blocks: PruneBlock[];
 	private previews: BlockPreview[];
-	private initialPruned: boolean[];
-	private stagedPruned: boolean[];
+	private initialStates: PruneState[];
+	private stagedStates: PruneState[];
 	private selectedIndex = 0;
 	private showAll = false;
 	private maxVisible: number;
@@ -37,11 +37,11 @@ class PruneList implements Component {
 	public onCommit?: (changes: PruneChange[]) => void;
 	public onCancel?: () => void;
 
-	constructor(blocks: PruneBlock[], previews: BlockPreview[], pruned: boolean[], maxVisible: number) {
+	constructor(blocks: PruneBlock[], previews: BlockPreview[], states: PruneState[], maxVisible: number) {
 		this.blocks = blocks;
 		this.previews = previews;
-		this.initialPruned = [...pruned];
-		this.stagedPruned = [...pruned];
+		this.initialStates = [...states];
+		this.stagedStates = [...states];
 		this.maxVisible = maxVisible;
 		// Start cursor on the newest (last) visible item
 		const visible = this.visibleIndices();
@@ -51,13 +51,15 @@ class PruneList implements Component {
 	}
 
 	private visibleIndices(): number[] {
-		return this.blocks.map((_, index) => index).filter((index) => this.showAll || !this.initialPruned[index]);
+		return this.blocks
+			.map((_, index) => index)
+			.filter((index) => this.showAll || this.initialStates[index] === "included");
 	}
 
 	private pendingCount(): number {
 		let count = 0;
 		for (let i = 0; i < this.blocks.length; i++) {
-			if (this.stagedPruned[i] !== this.initialPruned[i]) count++;
+			if (this.stagedStates[i] !== this.initialStates[i]) count++;
 		}
 		return count;
 	}
@@ -81,22 +83,24 @@ class PruneList implements Component {
 			const blockIndex = visible[i]!;
 			const preview = this.previews[blockIndex]!;
 			const isSelected = i === this.selectedIndex;
-			const isPruned = this.stagedPruned[blockIndex]!;
-			const isChanged = this.stagedPruned[blockIndex] !== this.initialPruned[blockIndex];
+			const state = this.stagedStates[blockIndex]!;
+			const isHidden = state !== "included";
+			const isChanged = state !== this.initialStates[blockIndex];
 
 			const cursor = isSelected ? theme.fg("accent", "› ") : "  ";
-			const suffix = `${isPruned ? " [pruned]" : ""}${isChanged ? " *" : ""}`;
+			const stateLabel = state === "excluded" ? " [pruned]" : state === "summarized" ? " [summarized]" : "";
+			const suffix = `${stateLabel}${isChanged ? " *" : ""}`;
 			let line = `${cursor}${preview.line}${suffix}`;
 			if (isSelected) {
 				line = theme.bold(line);
-			} else if (isPruned) {
+			} else if (isHidden) {
 				line = theme.fg("muted", line);
 			}
 			lines.push(truncateToWidth(line, width));
 
 			for (const detail of preview.detail) {
 				const detailLine = `     ${detail}`;
-				lines.push(truncateToWidth(isPruned ? theme.fg("muted", detailLine) : detailLine, width));
+				lines.push(truncateToWidth(isHidden ? theme.fg("muted", detailLine) : detailLine, width));
 			}
 		}
 
@@ -120,15 +124,15 @@ class PruneList implements Component {
 		} else if (kb.matches(keyData, "app.prune.toggle")) {
 			const blockIndex = visible[this.selectedIndex];
 			if (blockIndex !== undefined) {
-				this.stagedPruned[blockIndex] = !this.stagedPruned[blockIndex];
+				this.stagedStates[blockIndex] = this.stagedStates[blockIndex] === "included" ? "excluded" : "included";
 			}
 		} else if (kb.matches(keyData, "tui.select.confirm")) {
 			const changes: PruneChange[] = [];
 			for (let i = 0; i < this.blocks.length; i++) {
-				if (this.stagedPruned[i] !== this.initialPruned[i]) {
+				if (this.stagedStates[i] !== this.initialStates[i]) {
 					changes.push({
 						block: this.blocks[i]!,
-						state: this.stagedPruned[i] ? "excluded" : "included",
+						state: this.stagedStates[i]!,
 					});
 				}
 			}
@@ -181,10 +185,13 @@ export class PruneSelectorComponent extends Container implements Focusable {
 		super();
 
 		const previews = blocks.map((block) => previewBlock(block));
-		const pruned = blocks.map((block) => block.entryIds.every((id) => getPruneState(id) === "excluded"));
+		const states = blocks.map((block) => {
+			const state = getPruneState(block.entryIds[0]!);
+			return state && block.entryIds.every((id) => getPruneState(id) === state) ? state : "included";
+		});
 		const maxVisible = Math.max(5, Math.floor(terminalHeight / 2));
 
-		this.pruneList = new PruneList(blocks, previews, pruned, maxVisible);
+		this.pruneList = new PruneList(blocks, previews, states, maxVisible);
 		this.pruneList.onCommit = onCommit;
 		this.pruneList.onCancel = onCancel;
 

@@ -97,6 +97,7 @@ describe("ExtensionRunner", () => {
 		hasPendingMessages: () => false,
 		shutdown: () => {},
 		getContextUsage: () => undefined,
+		getReflectiveContextSummarizationModel: () => undefined,
 		compact: () => {},
 		getSystemPrompt: () => "",
 		getScopedModels: () => [],
@@ -501,6 +502,19 @@ describe("ExtensionRunner", () => {
 	});
 
 	describe("context creation", () => {
+		it("exposes the configured reflective-context summarization model", async () => {
+			const result = await discoverAndLoadExtensions([], tempDir, tempDir);
+			const runner = new ExtensionRunner(result.extensions, result.runtime, tempDir, sessionManager, modelRegistry);
+			const model = { provider: "summary-provider", model: "summary-model" };
+
+			runner.bindCore(extensionActions, {
+				...extensionContextActions,
+				getReflectiveContextSummarizationModel: () => model,
+			});
+
+			expect(runner.createContext().getReflectiveContextSummarizationModel()).toEqual(model);
+		});
+
 		it("exposes the current abort signal on ExtensionContext", async () => {
 			const result = await discoverAndLoadExtensions([], tempDir, tempDir);
 			const runner = new ExtensionRunner(result.extensions, result.runtime, tempDir, sessionManager, modelRegistry);

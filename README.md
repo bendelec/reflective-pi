@@ -56,10 +56,10 @@ Current observations are tracked in [Reflective context evaluation results](pack
 
 ### Future work
 
-Adding a third state "summarized" to each block of messages (currently they can only be included or excluded),
-supporting a kind of granular micro compaction by topic / block
+Adding manual summary requests to `/prune`. Blocks can now be replaced by concise summaries through the
+agent-facing `summarize_context` tool, but the selector currently supports only displaying and restoring them.
 
-Tracking context use for each message during the session and storing it with the session tree, so that the prun_context
+Tracking context use for each message during the session and storing it with the session tree, so that the prune_context
 tool can preview the correct number of tokens gained by pruning each block (better decision making input for the model)
 
 Making the pruning branch-scoped in pi's tree. Current implementation of the tree in pi doesn't have branch labels/tags

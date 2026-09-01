@@ -21,6 +21,14 @@ export interface BranchSummarySettings {
 	skipPrompt?: boolean; // default: false - when true, skips "Summarize branch?" prompt and defaults to no summary
 }
 
+/** Optional model used only for reflective context block summarization. */
+export interface ReflectiveContextSettings {
+	summarizationModel?: {
+		provider?: string;
+		model?: string;
+	};
+}
+
 export interface ProviderRetrySettings {
 	timeoutMs?: number; // SDK/provider request timeout in milliseconds
 	maxRetries?: number; // SDK/provider retry attempts
@@ -100,6 +108,7 @@ export interface Settings {
 	theme?: string;
 	compaction?: CompactionSettings;
 	branchSummary?: BranchSummarySettings;
+	reflectiveContext?: ReflectiveContextSettings;
 	retry?: RetrySettings;
 	hideThinkingBlock?: boolean;
 	showCacheMissNotices?: boolean; // default: false - show prompt-cache miss and compaction cost notices
@@ -856,6 +865,12 @@ export class SettingsManager {
 			reserveTokens: this.settings.branchSummary?.reserveTokens ?? 16384,
 			skipPrompt: this.settings.branchSummary?.skipPrompt ?? false,
 		};
+	}
+
+	getReflectiveContextSummarizationModel(): { provider: string; model: string } | undefined {
+		const model = this.settings.reflectiveContext?.summarizationModel;
+		if (!model?.provider || !model.model) return undefined;
+		return { provider: model.provider, model: model.model };
 	}
 
 	getBranchSummarySkipPrompt(): boolean {
