@@ -93,3 +93,18 @@ A 5/10 reflects real autonomous and deliberate pruning early in the task, but
 no durable hygiene habit through its difficult second half. This session used
 the original prompt; the strengthened quality-driven policy and >80% fallback
 instruction were introduced afterward and require separate evaluation.
+
+## Methodology notes
+
+2026-09-01: The agent tool interface changed mid-evaluation. `prune_context`'s
+dual-mode contract (no-arguments listing plus ids-based exclusion) was split
+into a read-only `list_context` tool and a strictly mutating `prune_context`
+that fails loudly when ids are missing, after several models were observed
+calling the tool bare and then reporting that they had successfully pruned.
+Evaluations started before this change are not directly comparable to ones
+started after it.
+
+The Laguna S 2.1 evaluation in progress at the time of the change was started
+under the old interface, interrupted, and continued under the new one. Its
+transcript spans both tool contracts, and its eventual grade must be read with
+that in mind.
