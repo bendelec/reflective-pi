@@ -24,10 +24,11 @@ was therefore unavoidable.
 
 **Status:** Final grade: **3/10**.
 
-The completed session had seven automatic compactions. The model made three
-`prune_context` calls, each after explicit user intervention. Those calls
-excluded 13, 5, and 88 stale blocks respectively, demonstrating that it can
-inspect the block list and prune effectively when directed.
+The completed session had seven automatic compactions. The model made six
+`prune_context` calls: three bare listing-mode calls and three effective
+exclusions of 13, 5, and 88 stale blocks respectively, each following
+explicit user intervention about context management — demonstrating that it
+can inspect the block list and prune effectively when directed.
 
 It did not sustain that behavior. After the final, successful 88-block cleanup,
 it allowed four more automatic compactions without another pruning pass. Its
@@ -59,7 +60,7 @@ context pressure and repeatedly attempted action that the interface silently
 absorbed.
 
 The context reached the compaction ceiling repeatedly: nine compaction
-entries, of which roughly six are genuine force-compactions. The trailing
+entries, of which six are genuine force-compactions. The trailing
 triple (19:09/19:22/19:34, tokensBefore 124582 -> 124176 -> 115128) is a
 failure-retry cascade of the known compaction reservation defect —
 physically impossible as genuine refills at the session's observed generation and tool-traffic rates — and is
@@ -67,10 +68,11 @@ not counted as three separate failures.
 
 No subagents were used (contrast Qwen 3.8's five delegated sessions and the
 IQ2 run's four verification passes): all work happened in the main session.
-The run produced the most output tokens of the three evaluated sessions
+The run produced the most output tokens of the evaluated field
 (968k) alongside the least effective curation, and its reasoning was the
-most stable (reconsideration markers 0.48 per 1k output tokens versus the
-IQ2's 1.71) — stability did not translate into curation effectiveness.
+most stable tier (reconsideration markers 0.30 per 1k output tokens, level
+with Qwen, versus the IQ2's 1.35) — stability did not translate into curation
+effectiveness.
 
 One false start (an accidental wrong-model launch, folder reset before the
 evaluated run) is excluded from the session.
@@ -94,9 +96,9 @@ even after a user supplied the correct syntax. This is a real tool-use weakness,
 but is materially mitigated by rxpi's then-untyped tool schema: the model was
 told only that `ids` accepted `Any`, despite the tool requiring an array of
 strings. DeepSeek V4 Flash did not encounter this problem, but the schema was
-still an avoidable contract ambiguity. After the schema was changed to advertise
-`ids: string[]`, a restarted session successfully pruned 62 blocks. It later
-made two further deliberate selections of 43 and 67 blocks.
+still an avoidable contract ambiguity. After a session interruption and
+resume, it made its first successful array-form selection — 62 blocks — and
+later two further deliberate selections of 43 and 67 blocks.
 
 The model consciously retained some potentially valuable context and excluded
 other material on the basis that source files remain available for re-reading.
@@ -159,9 +161,9 @@ was preempted by the raised compaction reserve (32k), so no earlier
 nudge existed to respond to.
 
 Notable outside the curation axis: the most output-efficient completion
-measured (571k output tokens versus 644k–968k for the other models), the
-highest reasoning volume in the field (~359k tokens of thinking,
-including coherent 32k-token turns), and effective work from compaction
+measured (571k output tokens versus 644k–968k for the other models), heavy
+reasoning use (454k thinking tokens, 79% of its output, including coherent
+32k-token turns), and effective work from compaction
 summaries it never requested. Reconsideration markers 0.80 per 1k
 output tokens — the second most hesitant model in the field, consistent
 with the local repetition-attractor anatomy: the temperament that stays
@@ -187,10 +189,10 @@ output tokens across thinking and text.
 
 | model | serving | grade | subagent sessions | turns | prompt tokens | output tokens | reconsideration/1k |
 |---|---|---|---|---|---|---|---|
-| DeepSeek V4 Flash (IQ2) | ds4, antirez IQ2 mixed | 3/10 | 4 (verification passes) | 457 | 20.58M | 644k | 1.71 |
-| DeepSeek V4 Flash (unquantized) | Venice (hosted), BF16 | 3/10 | none | 421 | 30.00M | 968k | 0.48 |
-| Qwen 3.8 27B | Lemonade, UD-Q8-L-XL | 5/10 | 5 (work-package delegation) | 806 | 51.16M | 961k | 0.40 |
-| Laguna S 2.1 (hosted) | OpenRouter, full precision | 3/10 | 2 (review, docs check) | 408 | 22.77M | 571k | 0.80 |
+| DeepSeek V4 Flash (IQ2) | ds4, antirez IQ2 mixed | 3/10 | 4 (verification passes) | 457 | 20.59M | 644k | 1.35 |
+| DeepSeek V4 Flash (unquantized) | Venice (hosted), BF16 | 3/10 | none | 421 | 30.00M | 968k | 0.30 |
+| Qwen 3.8 27B | Lemonade, UD-Q8-L-XL | 5/10 | 5 (work-package delegation) | 806 | 51.16M | 961k | 0.30 |
+| Laguna S 2.1 (hosted) | OpenRouter, full precision | 3/10 | 2 (review, docs check) | 409 | 22.77M | 571k | 0.80 |
 
 Laguna S 2.1 attempt 1 (mainline llama.cpp serving) is discarded; attempt 2
 (revived ds4 stack) is in progress and not yet graded.
@@ -254,3 +256,26 @@ scored avg_nll 0.239, first-token match 92/100, avg greedy LCP 10.9.
 A fresh evaluation session was started from scratch on this stack. This
 entry is temporary and will be reduced to a short footnote once that session
 has a valid result.
+
+### Session accounting rebuilt mechanically (2026-09-03, overnight)
+
+All quantitative claims were re-derived from the session files under a fixed
+protocol: the main session is the last-created session whose first user
+message is the standard implementation prompt; subagent sessions are those
+created after it whose first message matches a `run` tool call of the main;
+all other sessions (false starts, abandoned fragments) are excluded. Turns
+are assistant messages; token totals sum per-request usage over the main and
+matched subagent sessions; reconsideration markers are counted only in
+assistant thinking and text.
+
+Corrections from earlier drafts: reconsideration rates (IQ2 1.35, unquantized
+DS4F 0.30, Qwen 0.30 — earlier values 1.71/0.48/0.40 were inconsistently
+scoped), Laguna turns 409 (was 408), IQ2 prune calls six with three effective
+(was three), Laguna thinking volume 454k (was ~359k, and not the field's
+highest — the unquantized DS4F run reasoned 810k).
+
+Verified exact in the same pass: compaction counts and per-compaction
+context sizes for every run, the 13/5/88 and 62/43/67 block selections, the
+18-call unquantized-DS4F decomposition including the 42-block exclusion, the
+four compactions after the IQ2's final cleanup, and every subagent-session
+count in the comparison table.
