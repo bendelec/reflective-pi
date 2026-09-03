@@ -14,7 +14,7 @@ was therefore unavoidable.
 | Model | Hosting / quantization | Subjective grade | Short summary |
 | --- | --- | --- | --- |
 | DeepSeek V4 Flash | Local Dwarfstar `ds4`; `dwarfstar-iq2` | 3/10 | It can use `prune_context` effectively after explicit user direction, but did not autonomously sustain curation: seven automatic compactions occurred, including four after its final reminder. |
-| DeepSeek V4 Flash | Venice (hosted); BF16 | 3/10 (proposed) | Most autonomous curation intent observed, least effective execution: 18 self-initiated calls, one effective 42-block prune, fourteen silently absorbed no-ops, then six-plus harness force-compactions. |
+| DeepSeek V4 Flash | Venice (hosted); BF16 | 3/10 | Most autonomous curation intent observed, least effective execution: 18 self-initiated calls, one effective 42-block prune, fourteen silently absorbed no-ops, then six-plus harness force-compactions. |
 | Qwen3.8 27B | Local Lemonade; `UD-Q8-L-XL` | 5/10 | It made three substantial, deliberate cleanups after independently recognizing stale context, but then relied on six automatic compactions through the harder second half of the task. |
 
 ## Observations by model
@@ -45,7 +45,7 @@ that the current prompts alone cause models to manage context proactively.
 
 ### DeepSeek V4 Flash — Venice-hosted, unquantized BF16
 
-**Status:** Final grade: **3/10** (proposed; opposite profile of the IQ2 run).
+**Status:** Final grade: **3/10** (opposite profile of the IQ2 run).
 
 This session showed the most autonomous curation intent of any evaluated so
 far, and the least effective execution. The model made 18 self-initiated
@@ -143,7 +143,7 @@ output tokens across thinking and text.
 | model | serving | grade | subagent sessions | turns | prompt tokens | output tokens | reconsideration/1k |
 |---|---|---|---|---|---|---|---|
 | DeepSeek V4 Flash (IQ2) | ds4, antirez IQ2 mixed | 3/10 | 4 (verification passes) | 457 | 20.58M | 644k | 1.71 |
-| DeepSeek V4 Flash (unquantized) | Venice (hosted), BF16 | 3/10 (proposed) | none | 421 | 30.00M | 968k | 0.48 |
+| DeepSeek V4 Flash (unquantized) | Venice (hosted), BF16 | 3/10 | none | 421 | 30.00M | 968k | 0.48 |
 | Qwen 3.8 27B | Lemonade, UD-Q8-L-XL | 5/10 | 5 (work-package delegation) | 806 | 51.16M | 961k | 0.40 |
 
 Laguna S 2.1 attempt 1 (mainline llama.cpp serving) is discarded; attempt 2
