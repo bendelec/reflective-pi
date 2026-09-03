@@ -42,6 +42,42 @@ A 3/10 reflects demonstrated tool competence under direct guidance, but no
 reliable autonomous or sustained context curation. It is unsuitable as evidence
 that the current prompts alone cause models to manage context proactively.
 
+### DeepSeek V4 Flash — local Dwarfstar `ds4`, unquantized BF16
+
+**Status:** Final grade: **3/10** (proposed; opposite profile of the IQ2 run).
+
+This session showed the most autonomous curation intent of any evaluated so
+far, and the least effective execution. The model made 18 self-initiated
+`prune_context` calls without any user direction. Exactly one was effective:
+an early, reasoned 42-block exclusion of stale requirement reads and
+exploration output. One call used a hallucinated id. The remaining calls —
+fourteen — passed `{"ids": []}` and were each answered by the pre-split
+contract's success-shaped `Pruned 0 block(s).` no-op. The model perceived
+context pressure and repeatedly attempted action that the interface silently
+absorbed.
+
+The context reached the compaction ceiling repeatedly: nine compaction
+entries, of which roughly six are genuine force-compactions. The trailing
+triple (19:09/19:22/19:34, tokensBefore 124582 -> 124176 -> 115128) is a
+failure-retry cascade of the known compaction reservation defect —
+physically impossible as genuine refills at local inference speeds — and is
+not counted as three separate failures.
+
+No subagents were used (contrast Qwen 3.8's five delegated sessions and the
+IQ2 run's four verification passes): all work happened in the main session.
+The run produced the most output tokens of the three evaluated sessions
+(968k) alongside the least effective curation, and its reasoning was the
+most stable (reconsideration markers 0.48 per 1k output tokens versus the
+IQ2's 1.71) — stability did not translate into curation effectiveness.
+
+One false start (an accidental wrong-model launch, folder reset before the
+evaluated run) is excluded from the session.
+
+3/10 reflects genuine autonomous intent and one competent large prune,
+undermined by interface-shaped failure modes and no sustained effect: the
+harness still force-compacted the context roughly six times after the
+model's attempts.
+
 ### Qwen3.8 27B — local Lemonade, `UD-Q8-L-XL`
 
 **Status:** Final grade: **5/10**.
@@ -93,6 +129,24 @@ A 5/10 reflects real autonomous and deliberate pruning early in the task, but
 no durable hygiene habit through its difficult second half. This session used
 the original prompt; the strengthened quality-driven policy and >80% fallback
 instruction were introduced afterward and require separate evaluation.
+
+## Session comparison
+
+All evaluated runs: identical initial prompt and workspace, one initial
+round plus two repair rounds in the same main session; subagent sessions
+started after the main are included, discarded false starts excluded.
+Reconsideration markers: "but wait", "hold on", "on second thought",
+"scratch that", "let me reconsider", "actually, let me", "wait, no" per 1k
+output tokens across thinking and text.
+
+| model | serving | grade | subagent sessions | turns | prompt tokens | output tokens | reconsideration/1k |
+|---|---|---|---|---|---|---|---|
+| DeepSeek V4 Flash (IQ2) | ds4, antirez IQ2 mixed | 3/10 | 4 (verification passes) | 457 | 20.58M | 644k | 1.71 |
+| DeepSeek V4 Flash (unquantized) | ds4, BF16 | 3/10 (proposed) | none | 421 | 30.00M | 968k | 0.48 |
+| Qwen 3.8 27B | Lemonade, UD-Q8-L-XL | 5/10 | 5 (work-package delegation) | 806 | 51.16M | 961k | 0.40 |
+
+Laguna S 2.1 attempt 1 (mainline llama.cpp serving) is discarded; attempt 2
+(revived ds4 stack) is in progress and not yet graded.
 
 ## Methodology notes
 
