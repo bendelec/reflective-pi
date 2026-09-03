@@ -102,6 +102,7 @@ import {
 	type BashExecutionMessage,
 	type ContextStatusMessage,
 	type CustomMessage,
+	contextHygieneThresholdPercent,
 	createContextStatusMessage,
 } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
@@ -649,7 +650,9 @@ export class AgentSession {
 	 * Decide whether to emit a context-status message for the just-finished turn.
 	 *
 	 * Returns a message when (in order of precedence):
-	 * - context is at least 80% full (every turn),
+	 * - context reached the hygiene threshold derived from the compaction
+	 *   line (every turn; see contextHygieneThresholdPercent — the nudge
+	 *   must precede auto-compaction for any reserveTokens),
 	 * - the percent crossed a 10% multiple since the last insert,
 	 * - the current turn grew context usage by more than 5 percentage points,
 	 * - no status has been inserted yet (establish a baseline).
@@ -675,7 +678,13 @@ export class AgentSession {
 			return build();
 		}
 
-		if (percent >= 80) {
+		const compaction = this.settingsManager.getCompactionSettings();
+		const hygienePercent = contextHygieneThresholdPercent(
+			contextWindow,
+			compaction.reserveTokens,
+			compaction.enabled,
+		);
+		if (percent >= hygienePercent) {
 			return build(true);
 		}
 

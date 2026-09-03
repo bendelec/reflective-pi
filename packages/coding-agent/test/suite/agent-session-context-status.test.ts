@@ -2,7 +2,11 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
-import { CONTEXT_HYGIENE_CHECK_REQUIRED, createContextStatusMessage } from "../../src/core/messages.ts";
+import {
+	CONTEXT_HYGIENE_CHECK_REQUIRED,
+	contextHygieneThresholdPercent,
+	createContextStatusMessage,
+} from "../../src/core/messages.ts";
 import { createHarness, type Harness } from "./harness.ts";
 
 function createEchoTool(): AgentTool {
@@ -54,6 +58,21 @@ describe("AgentSession context status", () => {
 		const status = createContextStatusMessage(128_000, 102_400, 80, Date.now(), true);
 		expect(status.content).toContain("[context-status] window 128,000 · used 102,400 (80.0%)");
 		expect(status.content).toContain(CONTEXT_HYGIENE_CHECK_REQUIRED);
+	});
+
+	it("derives the hygiene threshold below the compaction line for any reserve", () => {
+		// Raised 32k reserve on a 131k window: compaction line at 75%, nudge at 70%.
+		// This is the configuration whose hard-coded 80% predecessor was preempted
+		// and then raced the compaction by 3 ms in the hosted Laguna evaluation.
+		expect(contextHygieneThresholdPercent(131_072, 32_768, true)).toBe(70);
+		// Default 16k reserve on a 128k window: line at 87.2%, line-5 = 82.2 caps
+		// back at 80 — the historical threshold is preserved exactly, and the cap
+		// never breaks ordering (it only engages when the line is at least 85%).
+		expect(contextHygieneThresholdPercent(128_000, 16_384, true)).toBe(80);
+		// Compaction disabled: no line to precede, historical threshold applies.
+		expect(contextHygieneThresholdPercent(128_000, 16_384, false)).toBe(80);
+		// Degenerate reserve not smaller than the window clamps at 50.
+		expect(contextHygieneThresholdPercent(1000, 16_384, true)).toBe(50);
 	});
 
 	it("does not inject a context-status message on a terminal (no-tool) turn", async () => {
