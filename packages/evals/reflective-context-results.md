@@ -108,3 +108,25 @@ The Laguna S 2.1 evaluation in progress at the time of the change was started
 under the old interface, interrupted, and continued under the new one. Its
 transcript spans both tool contracts, and its eventual grade must be read with
 that in mind.
+
+### Laguna S 2.1 — attempt discarded, replacement stack validated (2026-09-03, temporary)
+
+The first Laguna S 2.1 evaluation attempt (local serving via Lemonade /
+mainline llama.cpp) is discarded: mainline llama.cpp did not appear able to
+serve this model correctly. Evidence: the same 54k-token summarization input
+produced a 32,771-token capped, non-terminating output through mainline, but
+a 509-token naturally-stopping summary through a corrected serving stack
+(antirez's ds4, revived laguna branch), and 1,514 tokens hosted at full
+precision.
+
+Replacement local stack, validated before the fresh session: ds4
+`laguna-s2.1-revived` branch; custom Q4_K routed experts / Q8_0 signal-path
+GGUF from poolside's current weights with the original July rope config
+(262144 context, factor 32). Checks: clean stop tokens, coherent code
+generation, deterministic two-chunk compaction with natural stops
+(54,335 -> 509 tokens), and antirez's 100-case official-continuation dataset
+scored avg_nll 0.239, first-token match 92/100, avg greedy LCP 10.9.
+
+A fresh evaluation session was started from scratch on this stack. This
+entry is temporary and will be reduced to a short footnote once that session
+has a valid result.
