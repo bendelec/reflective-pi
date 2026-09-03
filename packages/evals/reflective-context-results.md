@@ -14,6 +14,7 @@ was therefore unavoidable.
 | Model | Hosting / quantization | Subjective grade | Short summary |
 | --- | --- | --- | --- |
 | DeepSeek V4 Flash | Local Dwarfstar `ds4`; `dwarfstar-iq2` | 3/10 | It can use `prune_context` effectively after explicit user direction, but did not autonomously sustain curation: seven automatic compactions occurred, including four after its final reminder. |
+| DeepSeek V4 Flash | Venice (hosted); BF16 | 3/10 (proposed) | Most autonomous curation intent observed, least effective execution: 18 self-initiated calls, one effective 42-block prune, fourteen silently absorbed no-ops, then six-plus harness force-compactions. |
 | Qwen3.8 27B | Local Lemonade; `UD-Q8-L-XL` | 5/10 | It made three substantial, deliberate cleanups after independently recognizing stale context, but then relied on six automatic compactions through the harder second half of the task. |
 
 ## Observations by model
@@ -42,7 +43,7 @@ A 3/10 reflects demonstrated tool competence under direct guidance, but no
 reliable autonomous or sustained context curation. It is unsuitable as evidence
 that the current prompts alone cause models to manage context proactively.
 
-### DeepSeek V4 Flash — local Dwarfstar `ds4`, unquantized BF16
+### DeepSeek V4 Flash — Venice-hosted, unquantized BF16
 
 **Status:** Final grade: **3/10** (proposed; opposite profile of the IQ2 run).
 
@@ -60,7 +61,7 @@ The context reached the compaction ceiling repeatedly: nine compaction
 entries, of which roughly six are genuine force-compactions. The trailing
 triple (19:09/19:22/19:34, tokensBefore 124582 -> 124176 -> 115128) is a
 failure-retry cascade of the known compaction reservation defect —
-physically impossible as genuine refills at local inference speeds — and is
+physically impossible as genuine refills at the session's observed generation and tool-traffic rates — and is
 not counted as three separate failures.
 
 No subagents were used (contrast Qwen 3.8's five delegated sessions and the
@@ -142,7 +143,7 @@ output tokens across thinking and text.
 | model | serving | grade | subagent sessions | turns | prompt tokens | output tokens | reconsideration/1k |
 |---|---|---|---|---|---|---|---|
 | DeepSeek V4 Flash (IQ2) | ds4, antirez IQ2 mixed | 3/10 | 4 (verification passes) | 457 | 20.58M | 644k | 1.71 |
-| DeepSeek V4 Flash (unquantized) | ds4, BF16 | 3/10 (proposed) | none | 421 | 30.00M | 968k | 0.48 |
+| DeepSeek V4 Flash (unquantized) | Venice (hosted), BF16 | 3/10 (proposed) | none | 421 | 30.00M | 968k | 0.48 |
 | Qwen 3.8 27B | Lemonade, UD-Q8-L-XL | 5/10 | 5 (work-package delegation) | 806 | 51.16M | 961k | 0.40 |
 
 Laguna S 2.1 attempt 1 (mainline llama.cpp serving) is discarded; attempt 2
