@@ -16,7 +16,7 @@ was therefore unavoidable.
 | DeepSeek V4 Flash | Local Dwarfstar `ds4`; `dwarfstar-iq2` | 3/10 | It can use `prune_context` effectively after explicit user direction, but did not autonomously sustain curation: seven automatic compactions occurred, including four after its final reminder. |
 | DeepSeek V4 Flash | Venice (hosted); BF16 | 3/10 | Most autonomous curation intent observed, least effective execution: 18 self-initiated calls, one effective 42-block prune, fourteen silently absorbed no-ops, then six-plus harness force-compactions. |
 | Qwen3.8 27B | Local Lemonade; `UD-Q8-L-XL` | 5/10 | It made three substantial, deliberate cleanups after independently recognizing stale context, but then relied on six automatic compactions through the harder second half of the task. |
-| Laguna S 2.1 | OpenRouter (hosted); full precision | 2/10 | Zero proactive curation across six automatic compactions; its only curation intent reacted to a stale pre-compaction status one second after compaction had already resolved the pressure. |
+| Laguna S 2.1 | OpenRouter (hosted); full precision | 3/10 | Responded to its only explicit hygiene nudge within one second, exactly as instructed — but the nudge raced the sixth compaction and lost by 3 ms. No proactive curation; five earlier buildups offered no nudge to respond to. |
 
 ## Observations by model
 
@@ -134,7 +134,7 @@ instruction were introduced afterward and require separate evaluation.
 
 ### Laguna S 2.1 — OpenRouter-hosted (poolside), full precision
 
-**Status:** Final grade: **2/10**.
+**Status:** Final grade: **3/10**.
 
 Completed all three rounds in one session with two subagent delegations,
 both correctly on the evaluated model: a focused code review of the
@@ -142,18 +142,21 @@ avoidance-region changes and a docs-consistency check during the final
 repair round. It never misused a tool: zero malformed calls, zero
 hallucinated ids, zero no-op calls.
 
-It never curated. Six automatic compactions carried the session (98k–120k
-tokens before each); `prune_context` and `summarize_context` were never
-called. Its first `list_context` (orientation) was the name-slotting
+Six automatic compactions carried the session (98k–120k tokens before
+each); `prune_context` and `summarize_context` were never effectively
+executed. Its first `list_context` (orientation) was the name-slotting
 miscall also observed locally — expecting a repository file listing,
-self-correcting immediately. Its second, deep in repair round 2, stated
-explicit curation intent ("check the context blocks and prune what's no
-longer needed") — but arrived one second after the sixth compaction,
-reacting to the stale pre-compaction context-status (91.9%) while the
-actual context held four fresh blocks with nothing stale to remove. It
-looked, correctly found nothing worth pruning, and returned to work.
-Across six real buildups it never acted proactively; the one moment of
-intent was a reaction to already-resolved pressure.
+self-correcting immediately. Its second, deep in repair round 2, was a
+correct, immediate response to the explicit hygiene nudge: the session's
+only hygiene message fired at 91.9% (19:25:18.850) in the same turn
+boundary as the sixth compaction (19:25:18.847 — the compaction won by
+3 ms), and the model answered it one second later with the instructed
+behavior: list the blocks, prune what is no longer needed. The listing
+showed the already-compacted context — four fresh blocks, nothing stale
+— and it correctly declined and returned to work. The five earlier
+compactions fired at gradual 75%-crossings where the 80% hygiene tier
+was preempted by the raised compaction reserve (32k), so no earlier
+nudge existed to respond to.
 
 Notable outside the curation axis: the most output-efficient completion
 measured (571k output tokens versus 644k–968k for the other models), the
@@ -166,8 +169,12 @@ a trait at full precision collapsed into a 41-cycle attractor on the
 local quant through an unguarded sampler (see the serving-stack notes
 below).
 
-2/10 reflects zero proactive context management — the harness did all
-of it — with a correct tool model and clean protocol use throughout.
+3/10 reflects demonstrated responsiveness to the harness's explicit
+curation instruction — immediate, correct, and following its script —
+with the execution consumed by a harness race (exempt per the Qwen
+compaction-rescue precedent), and no opportunity to demonstrate
+proactive curation: the signals were structurally preempted until the
+racing moment.
 
 ## Session comparison
 
@@ -183,7 +190,7 @@ output tokens across thinking and text.
 | DeepSeek V4 Flash (IQ2) | ds4, antirez IQ2 mixed | 3/10 | 4 (verification passes) | 457 | 20.58M | 644k | 1.71 |
 | DeepSeek V4 Flash (unquantized) | Venice (hosted), BF16 | 3/10 | none | 421 | 30.00M | 968k | 0.48 |
 | Qwen 3.8 27B | Lemonade, UD-Q8-L-XL | 5/10 | 5 (work-package delegation) | 806 | 51.16M | 961k | 0.40 |
-| Laguna S 2.1 (hosted) | OpenRouter, full precision | 2/10 | 2 (review, docs check) | 408 | 22.77M | 571k | 0.80 |
+| Laguna S 2.1 (hosted) | OpenRouter, full precision | 3/10 | 2 (review, docs check) | 408 | 22.77M | 571k | 0.80 |
 
 Laguna S 2.1 attempt 1 (mainline llama.cpp serving) is discarded; attempt 2
 (revived ds4 stack) is in progress and not yet graded.
@@ -199,6 +206,19 @@ successfully; models that react only at the boundary are nudged at the
 moment curation is pointless — and may learn that curation attempts are
 empty gestures. Backlog: surface the compaction event itself, or return
 the post-compaction status with the first post-compaction turn.
+
+2026-09-03: Hygiene-nudge preemption and race, root cause: raising
+`compaction.reserveTokens` to 32k moved the auto-compaction line to 75%,
+below the hard-coded 80% hygiene-message threshold. Gradual buildups
+then compact before the hygiene message can ever fire (five of Laguna's
+six compactions had no nudge), and a turn that jumps past both thresholds
+emits the nudge in the same turn boundary as the compaction — Laguna's
+only nudge raced its compaction and lost by 3 ms, then the model's
+correct one-second response arrived to an already-compacted context.
+Earlier graded runs (16k reserve, 87.5% line) were unaffected: the
+80% tier sat below the line. Fix: derive the hygiene threshold from the
+compaction line (line minus five points, clamped) so the nudge always
+precedes compaction for any reserve.
 
 2026-09-01: The agent tool interface changed mid-evaluation. `prune_context`'s
 dual-mode contract (no-arguments listing plus ids-based exclusion) was split
