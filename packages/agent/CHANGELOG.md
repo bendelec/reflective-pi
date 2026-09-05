@@ -6,6 +6,13 @@
 
 - Fixed tool callbacks updating the live context before the next model request.
 
+## [0.85.0] - 2026-09-04
+
+### Fixed
+
+- Fixed proxied assistant responses dropping persisted provider-native thinking levels.
+- Fixed the write tool reporting UTF-16 code-unit counts as byte counts by removing the misleading count ([#8979](https://github.com/earendil-works/pi/issues/8979)).
+
 ## [0.84.4] - 2026-08-28
 
 ### Breaking Changes
@@ -15,6 +22,10 @@
 ### Fixed
 
 - Fixed Windows `NodeExecutionEnv` aborts crashing when `taskkill.exe` is unavailable on `PATH` ([#6596](https://github.com/earendil-works/pi/issues/6596)).
+
+### Removed
+
+- Removed the withdrawn manual-drive configuration, action inspection methods, action outcomes, and snapshot action field from `AgentHarness`.
 
 ## [0.84.3] - 2026-08-24
 
