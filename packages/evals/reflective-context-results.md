@@ -17,6 +17,7 @@ was therefore unavoidable.
 | DeepSeek V4 Flash | Venice (hosted); BF16 | 3/10 | Most autonomous curation intent observed, least effective execution: 18 self-initiated calls, one effective 42-block prune, fourteen silently absorbed no-ops, then six-plus harness force-compactions. |
 | Qwen3.8 27B | Local Lemonade; `UD-Q8-L-XL` | 5/10 | It made three substantial, deliberate cleanups after independently recognizing stale context, but then relied on six automatic compactions through the harder second half of the task. |
 | Laguna S 2.1 | OpenRouter (hosted); full precision | 3/10 | Responded to its only explicit hygiene nudge within one second, exactly as instructed — but the nudge raced the sixth compaction and lost by 3 ms. No proactive curation; five earlier buildups offered no nudge to respond to. |
+| Laguna S 2.1 | Local ds4 (revived); sigQ8/Q4K, guarded | 2/10 | Only field model to attempt curation before pressure — correct block ids in a comma-joined string, rejected by the instructive error, then permanent abandonment; four forced compactions. |
 
 ## Observations by model
 
@@ -178,6 +179,50 @@ compaction-rescue precedent), and no opportunity to demonstrate
 proactive curation: the signals were structurally preempted until the
 racing moment.
 
+### Laguna S 2.1 — local ds4 (revived branch), sigQ8/Q4K, repetition-guarded
+
+**Status:** Final grade: **2/10** (proposed).
+
+A single ~24-hour session, no subagents, no false starts: initial prompt,
+two repair prompts, several short continue-nudges, and one early
+thinking-style steering message. It is the only run in the field that
+attempted context curation *before* capacity pressure: early in
+orientation, unprompted, with no context-status signal in the session at
+all, it listed the context and attempted a prune selecting four correct
+block ids from that listing — passed as a comma-joined string rather than
+the required array. The strict contract answered with the instructive
+error ("'ids' must be an array of block ids from list_context"); the model
+listed once more and never attempted another prune through the remaining
+~24 hours and four buildups to the compaction line. Correct intent at the
+right time; the field's weakest execution and persistence.
+
+No hygiene nudge ever fired in this run: the binary predated the derived
+70% threshold, so the 80% nudge tier sat permanently behind the 75%
+compaction line. As with the hosted run's preempted buildups, the absence
+of nudge-responses is not held against the model.
+
+Four threshold compactions carried the session (98.4k–99.7k tokens before
+each), all produced by compact-smart; the first predates the transition
+preamble's deployment, the last three open with it — the deployed
+feature's first live test passed. The run produced the field's leanest
+output (281k tokens versus 571k–968k) and its calmest reconsideration rate
+(0.25 per 1k output tokens; the same model measured 0.80 hosted — the
+largest serving-dependent temperament shift observed in the field).
+
+Serving conditions: the run began with the documented pre-guard attractor
+(24,850 sound reasoning tokens collapsing into a 41-cycle loop, capped at
+32,768); after the user's turn reset and the sampler guardrail (presence
+penalty 1.1 over a 1024-token session window), every monitored long turn
+— outputs up to 16k tokens — stayed clean for the rest of the run. The
+guardrail is a serving condition, not model merit: the model needs it to
+survive its own long turns. Two mid-work turn resets by the user around a
+test-code confusion phase are recorded as interventions; C++ content
+quality is graded separately.
+
+2/10 reflects the field's only pre-pressure curation intent, invalidated
+by one malformed call and permanent abandonment after a single
+instructive error, with four forced compactions completing the session.
+
 ## Session comparison
 
 All evaluated runs: identical initial prompt and workspace, one initial
@@ -193,9 +238,10 @@ output tokens across thinking and text.
 | DeepSeek V4 Flash (unquantized) | Venice (hosted), BF16 | 3/10 | none | 421 | 30.00M | 968k | 0.30 |
 | Qwen 3.8 27B | Lemonade, UD-Q8-L-XL | 5/10 | 5 (work-package delegation) | 806 | 51.16M | 961k | 0.30 |
 | Laguna S 2.1 (hosted) | OpenRouter, full precision | 3/10 | 2 (review, docs check) | 409 | 22.77M | 571k | 0.80 |
+| Laguna S 2.1 (local) | ds4 revived, sigQ8/Q4K + guardrail | 2/10 (proposed) | none | 411 | 20.56M | 281k | 0.25 |
 
-Laguna S 2.1 attempt 1 (mainline llama.cpp serving) is discarded; attempt 2
-(revived ds4 stack) is in progress and not yet graded.
+Laguna S 2.1 attempt 1 (mainline llama.cpp serving) is discarded; attempts 2
+(hosted) and 3 (local, guarded) are graded above.
 
 ## Methodology notes
 
@@ -235,27 +281,18 @@ under the old interface, interrupted, and continued under the new one. Its
 transcript spans both tool contracts, and its eventual grade must be read with
 that in mind.
 
-### Laguna S 2.1 — attempt discarded, replacement stack validated (2026-09-03, temporary)
+### Laguna S 2.1 — serving-stack note (final)
 
-The first Laguna S 2.1 evaluation attempt (local serving via Lemonade /
-mainline llama.cpp) is discarded: mainline llama.cpp did not appear able to
-serve this model correctly. Evidence: the same 54k-token summarization input
-produced a 32,771-token capped, non-terminating output through mainline, but
-a 509-token naturally-stopping summary through a corrected serving stack
-(antirez's ds4, revived laguna branch), and 1,514 tokens hosted at full
-precision.
-
-Replacement local stack, validated before the fresh session: ds4
-`laguna-s2.1-revived` branch; custom Q4_K routed experts / Q8_0 signal-path
-GGUF from poolside's current weights with the original July rope config
-(262144 context, factor 32). Checks: clean stop tokens, coherent code
-generation, deterministic two-chunk compaction with natural stops
-(54,335 -> 509 tokens), and antirez's 100-case official-continuation dataset
-scored avg_nll 0.239, first-token match 92/100, avg greedy LCP 10.9.
-
-A fresh evaluation session was started from scratch on this stack. This
-entry is temporary and will be reduced to a short footnote once that session
-has a valid result.
+Attempt 1 (Lemonade / mainline llama.cpp) is discarded: the same 54k-token
+summarization input produced a 32,771-token capped runaway through
+mainline, a 509-token natural stop through the corrected stack, and 1,514
+tokens hosted at full precision. Final local stack: ds4
+`laguna-s2.1-revived` branch, custom sigQ8/Q4K GGUF with the original
+July rope config, validated on antirez's 100-case continuation dataset
+(avg_nll 0.239, first-token match 92/100, avg greedy LCP 10.9) and
+extended locally with the Laguna-defaulted repetition guardrail. The
+local run above used this stack; the hosted run ran at full precision via
+OpenRouter.
 
 ### Session accounting rebuilt mechanically (2026-09-03, overnight)
 
