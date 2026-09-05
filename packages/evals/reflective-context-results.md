@@ -17,7 +17,7 @@ was therefore unavoidable.
 | DeepSeek V4 Flash | Venice (hosted); BF16 | 3/10 | Most autonomous curation intent observed, least effective execution: 18 self-initiated calls, one effective 42-block prune, fourteen silently absorbed no-ops, then six-plus harness force-compactions. |
 | Qwen3.8 27B | Local Lemonade; `UD-Q8-L-XL` | 5/10 | It made three substantial, deliberate cleanups after independently recognizing stale context, but then relied on six automatic compactions through the harder second half of the task. |
 | Laguna S 2.1 | OpenRouter (hosted); full precision | 3/10 | Responded to its only explicit hygiene nudge within one second, exactly as instructed — but the nudge raced the sixth compaction and lost by 3 ms. No proactive curation; five earlier buildups offered no nudge to respond to. |
-| Laguna S 2.1 | Local ds4 (revived); sigQ8/Q4K, guarded | 2/10 | Only field model to attempt curation before pressure — correct block ids in a comma-joined string, rejected by the instructive error, then permanent abandonment; four forced compactions. |
+| Laguna S 2.1 | Local ds4 (revived); sigQ8/Q4K, guarded | 3/10 | Only field model to attempt curation before pressure — correct block ids in a comma-joined string, rejected by the instructive error, then permanent abandonment; four forced compactions. |
 
 ## Observations by model
 
@@ -169,8 +169,8 @@ summaries it never requested. Reconsideration markers 0.80 per 1k
 output tokens — the second most hesitant model in the field, consistent
 with the local repetition-attractor anatomy: the temperament that stays
 a trait at full precision collapsed into a 41-cycle attractor on the
-local quant through an unguarded sampler (see the serving-stack notes
-below).
+local quant through an unguarded sampler (see the local run's serving
+note below).
 
 3/10 reflects demonstrated responsiveness to the harness's explicit
 curation instruction — immediate, correct, and following its script —
@@ -181,7 +181,7 @@ racing moment.
 
 ### Laguna S 2.1 — local ds4 (revived branch), sigQ8/Q4K, repetition-guarded
 
-**Status:** Final grade: **2/10** (proposed).
+**Status:** Final grade: **3/10**.
 
 A single ~24-hour session, no subagents, no false starts: initial prompt,
 two repair prompts, several short continue-nudges, and one early
@@ -193,8 +193,11 @@ block ids from that listing — passed as a comma-joined string rather than
 the required array. The strict contract answered with the instructive
 error ("'ids' must be an array of block ids from list_context"); the model
 listed once more and never attempted another prune through the remaining
-~24 hours and four buildups to the compaction line. Correct intent at the
-right time; the field's weakest execution and persistence.
+~24 hours and four buildups to the compaction line. The failure was one of
+argument structure, not selection or semantics — consistent with the
+model's broader structural tool-use weakness: its file edits repeatedly
+left duplicated or missing lines at edit edges, several times badly enough
+that it rewrote source files from scratch.
 
 No hygiene nudge ever fired in this run: the binary predated the derived
 70% threshold, so the 80% nudge tier sat permanently behind the 75%
@@ -209,19 +212,21 @@ output (281k tokens versus 571k–968k) and its calmest reconsideration rate
 (0.25 per 1k output tokens; the same model measured 0.80 hosted — the
 largest serving-dependent temperament shift observed in the field).
 
-Serving conditions: the run began with the documented pre-guard attractor
-(24,850 sound reasoning tokens collapsing into a 41-cycle loop, capped at
-32,768); after the user's turn reset and the sampler guardrail (presence
-penalty 1.1 over a 1024-token session window), every monitored long turn
-— outputs up to 16k tokens — stayed clean for the rest of the run. The
-guardrail is a serving condition, not model merit: the model needs it to
-survive its own long turns. Two mid-work turn resets by the user around a
-test-code confusion phase are recorded as interventions; C++ content
-quality is graded separately.
+Serving support for this model is unsatisfactory: it is prone to attractor
+loops when quantized, which the mainstream serving options did not
+sufficiently catch. After no luck with several alternatives, it was finally
+hosted successfully on a branch of antirez's ds4 with our own simple
+repetition guardrails added — a presence penalty over a session-token
+window, enabled for this model family only. Under that guardrail every
+monitored long turn of this run stayed clean, including 16k-token outputs;
+the guardrail is a serving condition, not model merit. Two mid-work turn
+resets by the user around a test-code confusion phase are recorded as
+interventions; C++ content quality is graded separately.
 
-2/10 reflects the field's only pre-pressure curation intent, invalidated
-by one malformed call and permanent abandonment after a single
-instructive error, with four forced compactions completing the session.
+3/10 reflects the field's only pre-pressure curation intent, genuine and
+correctly targeted; its failure was structural argument encoding, and it
+was followed by permanent abandonment after a single instructive error.
+Four forced compactions completed the session.
 
 ## Session comparison
 
@@ -238,10 +243,7 @@ output tokens across thinking and text.
 | DeepSeek V4 Flash (unquantized) | Venice (hosted), BF16 | 3/10 | none | 421 | 30.00M | 968k | 0.30 |
 | Qwen 3.8 27B | Lemonade, UD-Q8-L-XL | 5/10 | 5 (work-package delegation) | 806 | 51.16M | 961k | 0.30 |
 | Laguna S 2.1 (hosted) | OpenRouter, full precision | 3/10 | 2 (review, docs check) | 409 | 22.77M | 571k | 0.80 |
-| Laguna S 2.1 (local) | ds4 revived, sigQ8/Q4K + guardrail | 2/10 (proposed) | none | 411 | 20.56M | 281k | 0.25 |
-
-Laguna S 2.1 attempt 1 (mainline llama.cpp serving) is discarded; attempts 2
-(hosted) and 3 (local, guarded) are graded above.
+| Laguna S 2.1 (local) | ds4 revived, sigQ8/Q4K + guardrail | 3/10 | none | 411 | 20.56M | 281k | 0.25 |
 
 ## Methodology notes
 
@@ -280,19 +282,6 @@ The Laguna S 2.1 evaluation in progress at the time of the change was started
 under the old interface, interrupted, and continued under the new one. Its
 transcript spans both tool contracts, and its eventual grade must be read with
 that in mind.
-
-### Laguna S 2.1 — serving-stack note (final)
-
-Attempt 1 (Lemonade / mainline llama.cpp) is discarded: the same 54k-token
-summarization input produced a 32,771-token capped runaway through
-mainline, a 509-token natural stop through the corrected stack, and 1,514
-tokens hosted at full precision. Final local stack: ds4
-`laguna-s2.1-revived` branch, custom sigQ8/Q4K GGUF with the original
-July rope config, validated on antirez's 100-case continuation dataset
-(avg_nll 0.239, first-token match 92/100, avg greedy LCP 10.9) and
-extended locally with the Laguna-defaulted repetition guardrail. The
-local run above used this stack; the hosted run ran at full precision via
-OpenRouter.
 
 ### Session accounting rebuilt mechanically (2026-09-03, overnight)
 
