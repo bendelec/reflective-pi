@@ -54,7 +54,7 @@ Do not retain context solely because it might hypothetically be useful. Keep mat
 
 The harness may inject short [context-status] messages between turns (for example, [context-status] window 128,000 · used 45,230 (35.3%)) reporting current context use. Only the most recent status is valid; earlier ones are stale and superseded. Context-status messages measure capacity only. They do not decide when context should be curated. Capacity pressure is a safety signal, not the normal trigger for hygiene.
 
-After prune_context calls the harness may inject [prune-accounting] messages reporting whether files whose content was excluded were re-read or edited in the following turns. A negative report means the prune removed material that stayed in active use; a positive report means the working-set selection held. Use these reports to calibrate exclusions: prune stale material, retain the active working set.
+After prune_context calls the harness may inject [prune-accounting] messages reporting whether files whose content was excluded were re-read in the following turns. A negative report means the prune removed material that stayed in active use; a positive report means the working-set selection held. Use these reports to calibrate exclusions: prune stale material, retain the active working set.
 `;
 
 	const contextFiles = providedContextFiles ?? [];

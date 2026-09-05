@@ -91,11 +91,21 @@ describe("PruneAccounting", () => {
 		expect(a.onTurnEnd()?.kind).toBe("positive");
 	});
 
-	it("counts edits of excluded files as re-acquisition", () => {
+	it("does not count edits of excluded files as re-acquisition", () => {
 		const a = new PruneAccounting(CWD);
-		a.onPrune([pruneBlock(["nav.cpp"])]);
+		a.onPrune([pruneBlock(["nav.cpp"], "edit")]);
 		advance(a);
 		a.onToolUse("edit", "nav.cpp", 120);
+		for (let i = 1; i < PRUNE_ACCOUNTING_WINDOW_TURNS; i++) advance(a);
+		expect(a.onTurnEnd()?.kind).toBe("positive");
+	});
+
+	it("counts a later read of a file that was only edited before the prune", () => {
+		const a = new PruneAccounting(CWD);
+		// The ledger records touched files, edits included; only reads signal.
+		a.onPrune([pruneBlock(["nav.cpp"], "edit")]);
+		advance(a);
+		a.onToolUse("read", "nav.cpp", 800);
 		for (let i = 1; i < PRUNE_ACCOUNTING_WINDOW_TURNS; i++) advance(a);
 		const verdict = a.onTurnEnd();
 		expect(verdict?.kind).toBe("negative");

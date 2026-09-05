@@ -631,7 +631,7 @@ export class AgentSession {
 			// Post-prune accounting: observe this turn's read/edit work against the
 			// active window, advance the window, and collect any due verdict.
 			for (const part of context.message.content) {
-				if (part.type !== "toolCall" || (part.name !== "read" && part.name !== "edit")) continue;
+				if (part.type !== "toolCall" || part.name !== "read") continue;
 				const path = (part.arguments as { path?: unknown })?.path;
 				if (typeof path !== "string") continue;
 				this.pruneAccounting.onToolUse(part.name, path, this._toolOutputChars(part.id, context.toolResults));

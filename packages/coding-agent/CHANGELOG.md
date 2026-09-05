@@ -9,7 +9,7 @@
 ### Added
 
 - Added the `/prune` selector and `prune_context` tool for reversible, atomic context exclusion.
-- Added post-prune re-acquisition accounting: after `prune_context`, reads or edits targeting freshly excluded files are tracked for 15 turns and reported back as `[prune-accounting]` messages — negative when excluded material was re-acquired (early when heavy), positive when a full window passed without re-acquisition.
+- Added post-prune re-acquisition accounting: after `prune_context`, reads of files whose content was excluded are tracked for 15 turns and reported back as `[prune-accounting]` messages — negative when excluded material was re-read (early when heavy), positive when a full window passed without re-acquisition.
 
 ### Changed
 

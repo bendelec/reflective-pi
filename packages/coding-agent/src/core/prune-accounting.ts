@@ -17,6 +17,12 @@ import type { PruneBlock } from "./prune.ts";
  *   selection held. Without this arm, cost-only feedback teaches "prune
  *   less" instead of "prune correctly".
  *
+ * Re-acquisition is reads only. A blind edit that succeeds is context
+ * economy, not over-prune cost; one that fails forces a read, which this
+ * signal already captures. The ledger side records both reads and edits
+ * from the excluded blocks: a file the model edited is still working-set
+ * material, and a later read of it is genuine re-acquisition.
+ *
  * Re-acquisition after the window closes is not counted: a read many turns
  * later is not clearly attributable to the prune.
  */
@@ -46,7 +52,7 @@ interface ActiveWindow {
 	skipNextTurnEnd: boolean;
 }
 
-/** Extract the read/edit target paths from excluded prune blocks. */
+/** Extract the read/edit target paths (the touched files) from excluded prune blocks. */
 function extractPaths(blocks: readonly PruneBlock[], resolve: (p: string) => string): Set<string> {
 	const paths = new Set<string>();
 	for (const block of blocks) {
@@ -98,11 +104,13 @@ export class PruneAccounting {
 		return carried;
 	}
 
-	/** Record a read or edit execution from the turn that just finished. */
+	/** Record a read execution from the turn that just finished. Edits are not
+	 * re-acquisition: a successful blind edit is context economy, and a failed
+	 * one forces a read that this signal captures on its own. */
 	onToolUse(name: string, path: string, outputChars: number): void {
 		const w = this.window;
 		if (!w) return;
-		if (name !== "read" && name !== "edit") return;
+		if (name !== "read") return;
 		if (!w.paths.has(this.resolve(path))) return;
 		if (!w.files.includes(path)) w.files.push(path);
 		w.chars += outputChars;
@@ -155,5 +163,5 @@ export function formatPruneAccountingVerdict(verdict: PruneAccountingVerdict): s
 	}
 	const files = verdict.files.map((f) => `${f}`).join(", ");
 	const chars = verdict.chars.toLocaleString("en-US");
-	return `[prune-accounting] ${verdict.turns} turn(s) after pruning ${verdict.prunedBlocks} block(s), ${verdict.files.length} file(s) whose content was excluded were re-read or edited (~${chars} characters re-ingested): ${files}. The prune removed material that remained in active use.`;
+	return `[prune-accounting] ${verdict.turns} turn(s) after pruning ${verdict.prunedBlocks} block(s), ${verdict.files.length} file(s) whose content was excluded were re-read (~${chars} characters re-ingested): ${files}. The prune removed material that remained in active use.`;
 }
