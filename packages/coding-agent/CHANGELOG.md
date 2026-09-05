@@ -17,6 +17,7 @@
 
 ### Fixed
 
+- Fixed `/tree` rendering prune entries as empty rows: the tree selector had no display case for `prune` entries, so every context-exclusion marker showed as a bare bullet. They now render as `[prune: excluded]` / `[prune: summarized: …]` and are searchable and copyable.
 - Fixed `prune_context` advertising its required block IDs as unconstrained values instead of an array of strings.
 - Fixed standalone `rxpi` binaries reporting `0.0.0` after relocation without `package.json`.
 - Fixed compaction and branch extraction including pruned context entries.

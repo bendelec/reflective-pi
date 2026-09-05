@@ -609,6 +609,10 @@ class TreeList implements Component {
 			case "label":
 				parts.push("label", entry.label ?? "");
 				break;
+			case "prune":
+				parts.push("prune", entry.state);
+				if (entry.summary) parts.push(entry.summary);
+				break;
 		}
 
 		return parts.join(" ");
@@ -839,6 +843,11 @@ class TreeList implements Component {
 			case "label":
 				result = theme.fg("dim", `[label: ${entry.label ?? "(cleared)"}]`);
 				break;
+			case "prune": {
+				const summary = entry.summary ? `: ${normalize(entry.summary)}` : "";
+				result = theme.fg("dim", `[prune: ${entry.state}${summary}]`);
+				break;
+			}
 			case "session_info":
 				result = entry.name
 					? [theme.fg("dim", "[title: "), theme.fg("dim", entry.name), theme.fg("dim", "]")].join("")
@@ -916,6 +925,9 @@ class TreeList implements Component {
 				break;
 			case "branch_summary":
 				text = entry.summary;
+				break;
+			case "prune":
+				text = entry.summary ?? entry.state;
 				break;
 		}
 
