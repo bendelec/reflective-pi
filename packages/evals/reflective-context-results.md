@@ -18,6 +18,7 @@ was therefore unavoidable.
 | Qwen3.8 27B | Local Lemonade; `UD-Q8-L-XL` | 5/10 | It made three substantial, deliberate cleanups after independently recognizing stale context, but then relied on six automatic compactions through the harder second half of the task. |
 | Laguna S 2.1 | OpenRouter (hosted); full precision | 3/10 | Responded to its only explicit hygiene nudge within one second, exactly as instructed — but the nudge raced the sixth compaction and lost by 3 ms. No proactive curation; five earlier buildups offered no nudge to respond to. |
 | Laguna S 2.1 | Local ds4 (revived); sigQ8/Q4K, guarded | 3/10 | Only field model to attempt curation before pressure — correct block ids in a comma-joined string, rejected by the instructive error, then permanent abandonment; four forced compactions. |
+| Muse Glimmer 30B | Local Lemonade; `UD-Q8_K_XL` | 4/10 (proposed) | The field's best-executed curation under the hygiene nudge: six incremental prunes, 71.6% → 16%, zero compactions, zero output truncations — but purely pressure-triggered, and two prunes discarded its own repair-round working set. |
 
 ## Observations by model
 
@@ -228,6 +229,67 @@ correctly targeted; its failure was structural argument encoding, and it
 was followed by permanent abandonment after a single instructive error.
 Four forced compactions completed the session.
 
+### Muse Glimmer 30B — local Lemonade, `UD-Q8_K_XL`
+
+**Status:** Final grade: **4/10** (proposed).
+
+A single session spanning initial and both repair rounds: 66 assistant
+turns, no subagents, and the field's leanest run by an order of magnitude
+(57k output tokens; the field spans 281k–968k). Two false starts are
+excluded: an initial run under an undetected 4,096-token output envelope
+(the lemonade pi-plugin's fallback when the server reports no output limit
+— three truncations at exactly 4,096 before the cause was found; the
+envelope was corrected to 131k/32k parity before the evaluated run), and a
+wrong-model launch caused by `/new` resetting the session model to the
+default.
+
+Curation was purely pressure-triggered — but the pressure path worked
+end to end for the first time in the field. Round one climbed to 52.8%
+with no curation attempt; the repair round crossed the derived hygiene
+threshold (70% under the 32k reserve), the nudge fired at 71.2%, and the
+model began pruning within three minutes: six incremental `prune_context`
+calls over 30 minutes (8–10 blocks each, 58 blocks total), taking context
+from 71.6% to 16.0%. This is the derived-threshold fix's first live
+validation: the nudge preceded the compaction line, the model responded,
+and the session finished with **zero automatic compactions** — the only
+field model to avoid them — and zero output-limit truncations (maximum
+turn 13,035, ~40% of the cap; every predecessor hit its output cap on day
+one).
+
+Retroactive re-acquisition accounting over its six prunes (the mechanism
+was not yet live; the analysis is reconstructed from the session file):
+four prunes had clean windows, two discarded working-set material — the
+model re-read its own `implementation-plan.md` and `tests/test_basic.cpp`
+within the window, exactly the repair round's subject matter. Selection
+was otherwise correct: mostly older read-results, cleared in deliberate
+small steps rather than a panic amputation.
+
+A distinctive reasoning profile accompanies this: simplification markers
+at 3.15 per 1k thinking tokens (the rest of the field: 0.47–1.13 — an
+order-of-magnitude-family difference), and three spontaneous "given
+limited time" deliberations (two in round-one design, one at the repair
+round's opening) with no time language anywhere in the prompt — the
+model's controllable-effort training prior, expressed three ways: budget
+vocabulary, scope-trading deliberation, and output self-discipline.
+Reconsideration markers 0.00 per 1k output tokens — the field's calmest,
+against a range of 0.25–1.35.
+
+The C++ evaluation (graded separately, per the established split) scored
+the run 35/100 initially and 36/100 after both repair rounds — the
+reflex's cost side: the simplification profile that kept the session lean
+also produced the round-one findings of naive architecture and
+near-absent tests, and the repair round recovered a single point. The
+repair prompt deviated from the standard format by one soft sentence
+encouraging less worry about time and scope (recorded per protocol; the
+time vocabulary recurred once at the repair round's first turn, then was
+silent for the remaining forty).
+
+4/10 reflects the field's best-executed curation response — immediate,
+sustained, correctly targeted except for two working-set misses, and
+sufficient to prevent every forced compaction — while remaining strictly
+a response to the capacity nudge, with no boundary-initiated curation
+anywhere in the run.
+
 ## Session comparison
 
 All evaluated runs: identical initial prompt and workspace, one initial
@@ -244,8 +306,17 @@ output tokens across thinking and text.
 | Qwen 3.8 27B | Lemonade, UD-Q8-L-XL | 5/10 | 5 (work-package delegation) | 806 | 51.16M | 961k | 0.30 |
 | Laguna S 2.1 (hosted) | OpenRouter, full precision | 3/10 | 2 (review, docs check) | 409 | 22.77M | 571k | 0.80 |
 | Laguna S 2.1 (local) | ds4 revived, sigQ8/Q4K + guardrail | 3/10 | none | 411 | 20.56M | 281k | 0.25 |
+| Muse Glimmer 30B | Lemonade, UD-Q8_K_XL | 4/10 (proposed) | none | 66 | 3.40M | 57k | 0.00 |
 
 ## Methodology notes
+
+2026-09-05: Two false-start classes are now documented twice each and
+closed. Wrong-model launches (`/new` resets the session model to the
+default; occurred for unquantized DS4F and Muse Glimmer) — select the model
+before submitting the initial prompt. Undetected serving envelopes: the
+lemonade pi-plugin falls back to a 4,096-token output limit when the server
+reports none; a models.json `maxTokens` override restores envelope parity
+(the Muse Glimmer setup did so before its evaluated run).
 
 Mechanism observations that inform the proof of concept but do not belong
 per model are recorded in [`reflective-context-research-notes.md`](reflective-context-research-notes.md)
