@@ -247,6 +247,11 @@ output tokens across thinking and text.
 
 ## Methodology notes
 
+Mechanism observations that inform the proof of concept but do not belong
+per model are recorded in [`reflective-context-research-notes.md`](reflective-context-research-notes.md)
+(currently: a degenerate curation incident and the prune-manifest-as-memory
+finding).
+
 2026-09-03: Context-status staleness across compaction: the status value
 a model reasons against lags one turn behind a compaction that resolves
 the pressure. Laguna's only curation intent reacted to a 91.9% status one
