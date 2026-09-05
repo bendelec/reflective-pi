@@ -18,7 +18,7 @@ was therefore unavoidable.
 | Qwen3.8 27B | Local Lemonade; `UD-Q8-L-XL` | 5/10 | It made three substantial, deliberate cleanups after independently recognizing stale context, but then relied on six automatic compactions through the harder second half of the task. |
 | Laguna S 2.1 | OpenRouter (hosted); full precision | 3/10 | Responded to its only explicit hygiene nudge within one second, exactly as instructed — but the nudge raced the sixth compaction and lost by 3 ms. No proactive curation; five earlier buildups offered no nudge to respond to. |
 | Laguna S 2.1 | Local ds4 (revived); sigQ8/Q4K, guarded | 3/10 | Only field model to attempt curation before pressure — correct block ids in a comma-joined string, rejected by the instructive error, then permanent abandonment; four forced compactions. |
-| Muse Glimmer 30B | Local Lemonade; `UD-Q8_K_XL` | 4/10 (proposed) | The field's best-executed curation under the hygiene nudge: six incremental prunes, 71.6% → 16%, zero compactions, zero output truncations — but purely pressure-triggered, and two prunes discarded its own repair-round working set. |
+| Muse Glimmer 30B | Local Lemonade; `UD-Q8_K_XL` | 4/10 | The field's best-executed curation under the hygiene nudge: six incremental prunes, 71.6% → 16%, zero compactions, zero output truncations — but purely pressure-triggered, and two prunes discarded its own repair-round working set. |
 
 ## Observations by model
 
@@ -231,7 +231,7 @@ Four forced compactions completed the session.
 
 ### Muse Glimmer 30B — local Lemonade, `UD-Q8_K_XL`
 
-**Status:** Final grade: **4/10** (proposed).
+**Status:** Final grade: **4/10**.
 
 A single session spanning initial and both repair rounds: 66 assistant
 turns, no subagents, and the field's leanest run by an order of magnitude
@@ -306,7 +306,7 @@ output tokens across thinking and text.
 | Qwen 3.8 27B | Lemonade, UD-Q8-L-XL | 5/10 | 5 (work-package delegation) | 806 | 51.16M | 961k | 0.30 |
 | Laguna S 2.1 (hosted) | OpenRouter, full precision | 3/10 | 2 (review, docs check) | 409 | 22.77M | 571k | 0.80 |
 | Laguna S 2.1 (local) | ds4 revived, sigQ8/Q4K + guardrail | 3/10 | none | 411 | 20.56M | 281k | 0.25 |
-| Muse Glimmer 30B | Lemonade, UD-Q8_K_XL | 4/10 (proposed) | none | 66 | 3.40M | 57k | 0.00 |
+| Muse Glimmer 30B | Lemonade, UD-Q8_K_XL | 4/10 | none | 66 | 3.40M | 57k | 0.00 |
 
 ## Methodology notes
 
