@@ -1598,8 +1598,7 @@ export class SessionManager {
 					? {
 							...entry,
 							parentId: pathParentId,
-							firstKeptEntryId:
-								replacementByDroppedId.get(entry.firstKeptEntryId) ?? entry.firstKeptEntryId,
+							firstKeptEntryId: replacementByDroppedId.get(entry.firstKeptEntryId) ?? entry.firstKeptEntryId,
 						}
 					: { ...entry, parentId: pathParentId },
 			);
