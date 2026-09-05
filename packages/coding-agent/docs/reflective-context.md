@@ -31,8 +31,14 @@ These messages are **threshold-triggered, not inserted every turn**. A message
 is emitted only after a turn that actually executed tool work finished, and only
 when at least one of the following holds:
 
-- context is at least **80%** full (reported on every such turn while it stays
-  that full, with a mandatory context-hygiene check instruction);
+- context is at or above the **hygiene threshold** (reported on every such
+  turn while it stays that full, with a mandatory context-hygiene check
+  instruction). The threshold is derived from the automatic-compaction line —
+  five percentage points below it, clamped to the range [50%, 80%] — so the
+  hygiene instruction always arrives before automatic compaction. With
+  default compaction settings it is 80%; raising `compaction.reserveTokens`
+  lowers both the line and the threshold together (a reserve that compacts at
+  75% moves the threshold to 70%);
 - the usage percentage crossed a **10% multiple** since the last message (e.g.
   20% → 30%);
 - the just-finished turn grew context usage by more than **5 percentage
@@ -57,8 +63,8 @@ refactor, or failure, and before a new topic or work package — then retain onl
 material likely to help with the planned next steps or likely follow-up.
 
 `[context-status]` figures measure capacity; capacity pressure is a safety
-signal rather than the normal hygiene trigger. At 80% or more, the status note
-adds a mandatory fallback instruction to list blocks with `list_context` and
+signal rather than the normal hygiene trigger. At or above the hygiene
+threshold (see above), the status note adds a mandatory fallback instruction to list blocks with `list_context` and
 exclude every block that no longer adds value before continuing substantive
 work. This gives models that do not independently curate their context a clear
 last-resort action before automatic compaction.

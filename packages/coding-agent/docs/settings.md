@@ -119,6 +119,20 @@ Set `PI_SKIP_VERSION_CHECK=1` to disable the Pi version update check. Use `--off
 | `compaction.reserveTokens` | number | `16384` | Tokens reserved for LLM response |
 | `compaction.keepRecentTokens` | number | `20000` | Recent tokens to keep (not summarized) |
 
+Raising `reserveTokens` also lowers the `[context-status]` hygiene threshold:
+it tracks five percentage points below the compaction line, clamped to
+[50%, 80%], so hygiene nudges always precede automatic compaction (see
+[reflective-context.md](reflective-context.md)).
+
+### Reflective Context
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `reflectiveContext.summarizationModel` | object | - | Secondary model for `summarize_context` block summarization: `{ "provider": "...", "model": "..." }`. Falls back to the active agent model when unset. Does not affect manual or automatic compaction |
+
+See [reflective-context.md](reflective-context.md) for the agentic
+context-curation tools (`list_context`, `prune_context`, `summarize_context`).
+
 ```json
 {
   "compaction": {

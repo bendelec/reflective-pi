@@ -18,7 +18,7 @@ we're headed. Update as work lands.
 - **Binary rename** `pi` → `rxpi` (same commit).
 - **Prune MVP (data structure + `buildContextEntries`)** — `PruneEntry` +
   `PruneState` enum, resolved map, `appendPruneChange`, and the
-  `buildContextEntries`/`buildSessionContext` filter. Not yet committed.
+  `buildContextEntries`/`buildSessionContext` filter. Shipped.
 - **`prune_context` tool** — TUI tree view + agentic self-curation tool to
   add/remove prune markers. Context-status message now uses updated context
   after pruning (fixed agent-loop to pass updated context to
@@ -29,6 +29,19 @@ we're headed. Update as work lands.
 - **`createBranchedSession` prune filtering** — fork/clone filters and recreates
   prune entries like labels, including resolved global state from sibling
   branches.
+- **Agentic curation tools, one verb each** — `list_context` (read-only
+  listing), `prune_context` (strict mutation, fails loudly on missing ids),
+  `summarize_context` (block summarization, optional secondary model via
+  `reflectiveContext.summarizationModel`). Commits `58a6f47a1`, `2a673a649`.
+- **Proactive context hygiene reinforcement** — strengthened system prompt
+  treating context hygiene as a quality requirement, plus the mandatory
+  fallback instruction at the hygiene threshold. Commit `e4076d0dc`.
+- **Derived hygiene threshold** — the `[context-status]` hygiene tier tracks
+  the automatic-compaction line (five points below, clamped to [50%, 80%])
+  instead of a fixed 80%, so hygiene nudges always precede compaction.
+  Commit `367978486`.
+- **Bun fetch HTTP timeout fix** — the configured provider timeout is now
+  actually applied under Bun. Commit `855638b23`.
 
 ## Audit backlog (resolved locally)
 
