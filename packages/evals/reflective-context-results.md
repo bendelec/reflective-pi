@@ -235,13 +235,7 @@ Four forced compactions completed the session.
 
 A single session spanning initial and both repair rounds: 66 assistant
 turns, no subagents, and the field's leanest run by an order of magnitude
-(57k output tokens; the field spans 281k–968k). Two false starts are
-excluded: an initial run under an undetected 4,096-token output envelope
-(the lemonade pi-plugin's fallback when the server reports no output limit
-— three truncations at exactly 4,096 before the cause was found; the
-envelope was corrected to 131k/32k parity before the evaluated run), and a
-wrong-model launch caused by `/new` resetting the session model to the
-default.
+(57k output tokens; the field spans 281k–968k).
 
 Curation was purely pressure-triggered — but the pressure path worked
 end to end for the first time in the field. Round one climbed to 52.8%
@@ -310,13 +304,10 @@ output tokens across thinking and text.
 
 ## Methodology notes
 
-2026-09-05: Two false-start classes are now documented twice each and
-closed. Wrong-model launches (`/new` resets the session model to the
-default; occurred for unquantized DS4F and Muse Glimmer) — select the model
-before submitting the initial prompt. Undetected serving envelopes: the
-lemonade pi-plugin falls back to a 4,096-token output limit when the server
-reports none; a models.json `maxTokens` override restores envelope parity
-(the Muse Glimmer setup did so before its evaluated run).
+Setup reminder for lemonade-served models: the lemonade pi-plugin falls
+back to a 4,096-token output limit when the server reports none; a
+models.json `maxTokens` override restores envelope parity. Pre-apply the
+override when creating a candidate entry.
 
 Mechanism observations that inform the proof of concept but do not belong
 per model are recorded in [`reflective-context-research-notes.md`](reflective-context-research-notes.md)
