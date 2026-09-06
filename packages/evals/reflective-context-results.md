@@ -76,9 +76,6 @@ most stable tier (reconsideration markers 0.30 per 1k output tokens, level
 with Qwen, versus the IQ2's 1.35) — stability did not translate into curation
 effectiveness.
 
-One false start (an accidental wrong-model launch, folder reset before the
-evaluated run) is excluded from the session.
-
 3/10 reflects genuine autonomous intent and one competent large prune,
 undermined by interface-shaped failure modes and no sustained effect: the
 harness still force-compacted the context roughly six times after the
@@ -184,7 +181,7 @@ racing moment.
 
 **Status:** Final grade: **3/10**.
 
-A single ~24-hour session, no subagents, no false starts: initial prompt,
+A single ~24-hour session, no subagents: initial prompt,
 two repair prompts, several short continue-nudges, and one early
 thinking-style steering message. It is the only run in the field that
 attempted context curation *before* capacity pressure: early in
