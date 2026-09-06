@@ -376,6 +376,7 @@ export class AgentSession {
 	private _contextStatusTurnStartPercent: number | null = null;
 	private _contextStatusForceNext = false;
 	private _pruneHappenedThisTurn = false;
+	private _pruneSkipNextCompactionCheck = false;
 	private _pruneAccounting: PruneAccounting | undefined;
 	private _pendingAccountingVerdict: PruneAccountingVerdict | undefined;
 
@@ -579,10 +580,27 @@ export class AgentSession {
 		const model = this.model;
 		const settings = this.settingsManager.getCompactionSettings();
 
+		// A prune/summarize in the turn just finished rebuilt the live context, but
+		// the next request's usage — the anchor estimateContextTokens uses — still
+		// reflects the pre-prune request. Skip the threshold check once; the next
+		// response brings the pruned context's real size, and the following check
+		// compacts on fresh data if the line is still crossed. Mirrors the
+		// context-status hook's staleness policy for the same situation.
+		if (this._pruneSkipNextCompactionCheck) {
+			this._pruneSkipNextCompactionCheck = false;
+			return context;
+		}
+
+		// Estimate from the live session context, not the turn snapshot: a
+		// prune_context call rebuilds agent.state.messages mid-turn (setPruneState)
+		// while the turn context still holds the pre-rebuild array. Estimating the
+		// stale array triggers a threshold compaction of a context that no longer
+		// exists (observed live: a 54-block prune to 62k tokens was followed by a
+		// compaction that had read the stale 100k figure).
 		if (
 			!model ||
 			model.contextWindow <= 0 ||
-			!shouldCompact(estimateContextTokens(context.messages).tokens, model.contextWindow, settings)
+			!shouldCompact(estimateContextTokens(this.agent.state.messages).tokens, model.contextWindow, settings)
 		) {
 			return context;
 		}
@@ -2099,6 +2117,7 @@ export class AgentSession {
 		}
 		this.agent.state.messages = this.sessionManager.buildSessionContext().messages;
 		this._pruneHappenedThisTurn = true;
+		this._pruneSkipNextCompactionCheck = true;
 	}
 
 	/** Replace one atomic context block with a persisted summary. */
@@ -2108,6 +2127,7 @@ export class AgentSession {
 		}
 		this.agent.state.messages = this.sessionManager.buildSessionContext().messages;
 		this._pruneHappenedThisTurn = true;
+		this._pruneSkipNextCompactionCheck = true;
 	}
 
 	// =========================================================================

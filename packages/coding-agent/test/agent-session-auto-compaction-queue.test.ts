@@ -446,4 +446,159 @@ describe("AgentSession auto-compaction queue resume", () => {
 		// Should NOT compact because the only usage data is from a kept pre-compaction message
 		expect(runAutoCompactionSpy).not.toHaveBeenCalled();
 	});
+
+	it("should not threshold-compact when the finished turn pruned the context under the line", async () => {
+		// Regression (observed live in the vwmini_q38_flash eval session, 2026-09-06):
+		// a 54-block prune_context brought the context well under the compaction
+		// line, but the threshold check still estimated the turn's stale pre-prune
+		// snapshot (and the usage anchor still reflected the pre-prune request), so
+		// the session was compacted anyway. The prune grace skips the first check;
+		// the next response brings the pruned context's real usage.
+		settingsManager.applyOverrides({ compaction: { enabled: true, reserveTokens: 200, keepRecentTokens: 1 } });
+		session.agent.state.model = { ...session.model!, contextWindow: 1000 };
+
+		sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "big block that will be pruned" }],
+			timestamp: Date.now() - 2000,
+		});
+		const model = session.model!;
+		sessionManager.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "ack" }],
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: 900,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 900,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: Date.now() - 1000,
+		});
+		session.agent.state.messages = sessionManager.buildSessionContext().messages;
+		// The turn context snapshot the agent loop carries: taken before the prune.
+		const staleTurnContext = { messages: session.agent.state.messages.slice() };
+
+		const userEntry = sessionManager.getEntries().find((e) => e.type === "message" && e.message.role === "user");
+		expect(userEntry).toBeDefined();
+		session.setPruneState([userEntry!.id], "excluded");
+
+		const compactBefore = (
+			session as unknown as {
+				_compactBeforeNextAssistantResponse: (context: { messages: unknown[] }) => Promise<{ messages: unknown[] }>;
+			}
+		)._compactBeforeNextAssistantResponse.bind(session);
+
+		// First check after the prune: skipped. The surviving usage anchor (900)
+		// still describes the pre-prune request; compacting here would destroy the
+		// just-curated context.
+		await compactBefore(staleTurnContext);
+		expect(sessionManager.getEntries().some((e) => e.type === "compaction")).toBe(false);
+	});
+
+	it("should still threshold-compact without a prune when the line is crossed", async () => {
+		// Control for the prune-grace regression test: the same anchored context,
+		// no prune, must produce a compaction entry through the same check.
+		settingsManager.applyOverrides({ compaction: { enabled: true, reserveTokens: 200, keepRecentTokens: 1 } });
+		session.agent.state.model = { ...session.model!, contextWindow: 1000 };
+
+		sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "older context to summarize" }],
+			timestamp: Date.now() - 3000,
+		});
+		const model = session.model!;
+		sessionManager.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "ack" }],
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: 900,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 900,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: Date.now() - 2000,
+		});
+		sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "trailing prompt" }],
+			timestamp: Date.now() - 1000,
+		});
+		session.agent.state.messages = sessionManager.buildSessionContext().messages;
+
+		session.agent.streamFunction = (summaryModel) => {
+			const stream = createAssistantMessageEventStream();
+			void Promise.resolve().then(() => {
+				stream.push({
+					type: "done",
+					reason: "stop",
+					message: {
+						...fauxAssistantMessage("compacted"),
+						api: summaryModel.api,
+						provider: summaryModel.provider,
+						model: summaryModel.id,
+						usage: {
+							input: 10,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							totalTokens: 10,
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+						},
+					},
+				});
+			});
+			return stream;
+		};
+
+		const compactBefore = (
+			session as unknown as {
+				_compactBeforeNextAssistantResponse: (context: { messages: unknown[] }) => Promise<{ messages: unknown[] }>;
+			}
+		)._compactBeforeNextAssistantResponse.bind(session);
+
+		await compactBefore({ messages: session.agent.state.messages.slice() });
+		expect(sessionManager.getEntries().some((e) => e.type === "compaction")).toBe(true);
+	});
+
+	it("should estimate the live context, not the turn snapshot, at the threshold check", async () => {
+		// A mid-turn context rebuild (prune) leaves the turn's context object
+		// holding the pre-rebuild array; the check must estimate the rebuilt
+		// agent.state.messages instead. Isolated from the prune grace flag by
+		// rebuilding state directly.
+		settingsManager.applyOverrides({ compaction: { enabled: true, reserveTokens: 200, keepRecentTokens: 1 } });
+		session.agent.state.model = { ...session.model!, contextWindow: 1000 };
+
+		const big = "x".repeat(2000);
+		for (let i = 0; i < 3; i++) {
+			sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: big }],
+				timestamp: Date.now() - 3000 + i,
+			});
+		}
+		const full = sessionManager.buildSessionContext().messages;
+		// Simulate the post-rebuild live context without touching the prune flags.
+		session.agent.state.messages = [full[0]];
+
+		const compactBefore = (
+			session as unknown as {
+				_compactBeforeNextAssistantResponse: (context: { messages: unknown[] }) => Promise<{ messages: unknown[] }>;
+			}
+		)._compactBeforeNextAssistantResponse.bind(session);
+
+		await compactBefore({ messages: full });
+		expect(sessionManager.getEntries().some((e) => e.type === "compaction")).toBe(false);
+	});
 });

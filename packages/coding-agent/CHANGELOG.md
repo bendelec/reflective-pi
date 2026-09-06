@@ -17,6 +17,7 @@
 
 ### Fixed
 
+- Fixed auto-compaction firing immediately after a `prune_context`/`summarize_context` turn: the threshold check estimated the turn's stale pre-prune context, and the usage anchor it derives token counts from still described the pre-prune request, so a prune that brought the context under the compaction line was ignored and the session was compacted anyway. The check now estimates the live session context and skips once after a prune, letting the next response report the pruned context's real size.
 - Fixed `/tree` rendering prune entries as empty rows: the tree selector had no display case for `prune` entries, so every context-exclusion marker showed as a bare bullet. They now render as `[prune: excluded]` / `[prune: summarized: …]` and are searchable and copyable.
 - Fixed `prune_context` advertising its required block IDs as unconstrained values instead of an array of strings.
 - Fixed standalone `rxpi` binaries reporting `0.0.0` after relocation without `package.json`.
