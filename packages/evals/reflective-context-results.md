@@ -285,19 +285,19 @@ anywhere in the run.
 
 All evaluated runs: identical initial prompt and workspace, one initial
 round plus two repair rounds in the same main session; subagent sessions
-started after the main are included, discarded false starts excluded.
+started after the main are included; all other sessions are excluded.
 Reconsideration markers: "but wait", "hold on", "on second thought",
 "scratch that", "let me reconsider", "actually, let me", "wait, no" per 1k
 output tokens across thinking and text.
 
-| model | serving | grade | subagent sessions | turns | prompt tokens | output tokens | reconsideration/1k |
-|---|---|---|---|---|---|---|---|
-| DeepSeek V4 Flash (IQ2) | ds4, antirez IQ2 mixed | 3/10 | 4 (verification passes) | 457 | 20.59M | 644k | 1.35 |
-| DeepSeek V4 Flash (unquantized) | Venice (hosted), BF16 | 3/10 | none | 421 | 30.00M | 968k | 0.30 |
-| Qwen 3.8 27B | Lemonade, UD-Q8-L-XL | 5/10 | 5 (work-package delegation) | 806 | 51.16M | 961k | 0.30 |
-| Laguna S 2.1 (hosted) | OpenRouter, full precision | 3/10 | 2 (review, docs check) | 409 | 22.77M | 571k | 0.80 |
-| Laguna S 2.1 (local) | ds4 revived, sigQ8/Q4K + guardrail | 3/10 | none | 411 | 20.56M | 281k | 0.25 |
-| Muse Glimmer 30B | Lemonade, UD-Q8_K_XL | 4/10 | none | 66 | 3.40M | 57k | 0.00 |
+| model | serving | grade | main session | subagent sessions | turns | prompt tokens | output tokens | reconsideration/1k |
+|---|---|---|---|---|---|---|---|---|
+| DeepSeek V4 Flash (IQ2) | ds4, antirez IQ2 mixed | 3/10 | `01a00bb1` | 4 (verification passes) | 457 | 20.59M | 644k | 1.35 |
+| DeepSeek V4 Flash (unquantized) | Venice (hosted), BF16 | 3/10 | `01a03896` | none | 421 | 30.00M | 968k | 0.30 |
+| Qwen 3.8 27B | Lemonade, UD-Q8-L-XL | 5/10 | `01a01b54` | 5 (work-package delegation) | 806 | 51.16M | 961k | 0.30 |
+| Laguna S 2.1 (hosted) | OpenRouter, full precision | 3/10 | `01a067fc` | 2 (review, docs check) | 409 | 22.77M | 571k | 0.80 |
+| Laguna S 2.1 (local) | ds4 revived, sigQ8/Q4K + guardrail | 3/10 | `01a06705` | none | 411 | 20.56M | 281k | 0.25 |
+| Muse Glimmer 30B | Lemonade, UD-Q8_K_XL | 4/10 | `01a07220` | none | 66 | 3.40M | 57k | 0.00 |
 
 ## Methodology notes
 
@@ -353,7 +353,7 @@ All quantitative claims were re-derived from the session files under a fixed
 protocol: the main session is the last-created session whose first user
 message is the standard implementation prompt; subagent sessions are those
 created after it whose first message matches a `run` tool call of the main;
-all other sessions (false starts, abandoned fragments) are excluded. Turns
+all other sessions are excluded. Turns
 are assistant messages; token totals sum per-request usage over the main and
 matched subagent sessions; reconsideration markers are counted only in
 assistant thinking and text.
