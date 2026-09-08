@@ -25,7 +25,7 @@ import type {
 	PrepareNextTurnContext,
 	ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import { contentText, type ToolResultMessage } from "@earendil-works/pi-ai";
+import { contentText } from "@earendil-works/pi-ai";
 import type {
 	AssistantMessage,
 	AuthResult,
@@ -109,7 +109,6 @@ import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import { groupPruneBlocks, type PruneBlock, previewBlock } from "./prune.ts";
-import { formatPruneAccountingVerdict, PruneAccounting, type PruneAccountingVerdict } from "./prune-accounting.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import { exportSessionToJsonl } from "./session-export.ts";
 import type {
@@ -377,8 +376,6 @@ export class AgentSession {
 	private _contextStatusForceNext = false;
 	private _pruneHappenedThisTurn = false;
 	private _pruneSkipNextCompactionCheck = false;
-	private _pruneAccounting: PruneAccounting | undefined;
-	private _pendingAccountingVerdict: PruneAccountingVerdict | undefined;
 
 	private _resourceLoader: ResourceLoader;
 	private _customTools: ToolDefinition[];
@@ -646,21 +643,6 @@ export class AgentSession {
 	 */
 	private _installContextStatusHook(): void {
 		this.agent.getContextStatusMessages = async (context) => {
-			// Post-prune accounting: observe this turn's read/edit work against the
-			// active window, advance the window, and collect any due verdict.
-			for (const part of context.message.content) {
-				if (part.type !== "toolCall" || part.name !== "read") continue;
-				const path = (part.arguments as { path?: unknown })?.path;
-				if (typeof path !== "string") continue;
-				this.pruneAccounting.onToolUse(part.name, path, this._toolOutputChars(part.id, context.toolResults));
-			}
-			const verdictMessages: AgentMessage[] = [];
-			const pending = this._pendingAccountingVerdict;
-			this._pendingAccountingVerdict = undefined;
-			if (pending) verdictMessages.push(this._accountingMessage(pending));
-			const verdict = this.pruneAccounting.onTurnEnd();
-			if (verdict) verdictMessages.push(this._accountingMessage(verdict));
-
 			// Only inject when the turn just executed tool work. A terminal turn (no tool
 			// results) would otherwise be forced into an extra assistant response, which
 			// cascades into an infinite loop once context is >= 80%. The same applies when
@@ -674,33 +656,11 @@ export class AgentSession {
 			// server response with the pruned context before reporting status.
 			if (this._pruneHappenedThisTurn) {
 				this._pruneHappenedThisTurn = false;
-				return verdictMessages;
+				return [];
 			}
 			const message = this._maybeBuildContextStatusMessage();
-			return message ? [message, ...verdictMessages] : verdictMessages;
+			return message ? [message] : [];
 		};
-	}
-
-	private get pruneAccounting(): PruneAccounting {
-		if (!this._pruneAccounting) this._pruneAccounting = new PruneAccounting(this._cwd);
-		return this._pruneAccounting;
-	}
-
-	/** Total text characters in a tool result, by call id. */
-	private _toolOutputChars(callId: string, toolResults: readonly ToolResultMessage[]): number {
-		for (const result of toolResults) {
-			if (result.toolCallId !== callId) continue;
-			let chars = 0;
-			for (const part of result.content) {
-				if (typeof (part as TextContent).text === "string") chars += (part as TextContent).text.length;
-			}
-			return chars;
-		}
-		return 0;
-	}
-
-	private _accountingMessage(verdict: PruneAccountingVerdict): AgentMessage {
-		return { role: "user", content: formatPruneAccountingVerdict(verdict), timestamp: Date.now() };
 	}
 
 	/**
@@ -3165,10 +3125,6 @@ export class AgentSession {
 				this._contextStatusLastPercent = null;
 				// Force a context-status message on the next turn so the user can verify the pruning worked
 				this._contextStatusForceNext = true;
-				// Open the post-prune re-acquisition window. A verdict carried out of a
-				// window closed by this prune is delivered at the next turn end.
-				const carriedVerdict = this.pruneAccounting.onPrune(matched);
-				if (carriedVerdict) this._pendingAccountingVerdict = carriedVerdict;
 
 				const lines: string[] = [`Pruned ${matched.length} block(s).`];
 				lines.push("");

@@ -97,20 +97,6 @@ For tool details, `read` and `bash` identify their result; `write` and `edit`
 identify their input. Other tools show their name only. This distinction preserves
 the most useful identity signal without displaying full tool output.
 
-## Post-prune accounting
-
-`PruneAccounting` opens a 15-turn window for each successful `prune_context`
-call. It records files read or edited in the excluded blocks, then watches later
-`read` calls for those paths. A positive result says the full window was clean. A
-negative result reports the files and approximately how much content was reread;
-it is emitted early after three files or 5,000 characters, otherwise at window
-close.
-
-A subsequent prune closes an earlier window. A clean earlier window that is cut
-short is discarded rather than treated as positive evidence. The mechanism does
-not yet observe shell-mediated reads or assess whether a replacement summary was
-sufficient.
-
 ## Deferred work
 
 - Attribute reliable token use to each block and expose it in the selector and

@@ -156,19 +156,6 @@ The show-all view marks excluded blocks as `[pruned]` and summarized blocks as
 The selector can inspect and restore summaries, but cannot create one; use
 `summarize_context` for that.
 
-## Post-prune feedback
-
-After `prune_context`, rxpi tracks file reads for the following 15 turns. If the
-model rereads a file whose contents occurred in the excluded blocks, it receives a
-negative `[prune-accounting]` message; a full clean window produces a positive
-verdict. The feature exposes the otherwise invisible cost of removing active
-working-set material.
-
-Version one tracks `read` calls and counts paths that were read or edited in the
-excluded blocks. It does not yet account for shell-mediated rereads such as `grep`
-or `sed`, nor does it cover `summarize_context`. These limits matter when
-interpreting evaluation results.
-
 ## Planned work
 
 - Show per-block token use or a trustworthy capacity estimate in `list_context`
@@ -184,6 +171,5 @@ interpreting evaluation results.
 | Context tools | `packages/coding-agent/src/core/agent-session.ts` (`_createListToolDefinition`, `_createPruneToolDefinition`, `_createSummarizeToolDefinition`) |
 | Block grouping and previews | `packages/coding-agent/src/core/prune.ts` |
 | Context projection and curation state | `packages/coding-agent/src/core/session-manager.ts` |
-| Re-acquisition accounting | `packages/coding-agent/src/core/prune-accounting.ts` |
 | `/prune` selector | `packages/coding-agent/src/modes/interactive/components/prune-selector.ts` |
 | TUI status rendering | `packages/coding-agent/src/modes/interactive/components/context-status-message.ts` |
