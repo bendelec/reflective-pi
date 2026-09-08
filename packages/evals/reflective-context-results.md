@@ -1,371 +1,513 @@
-# Reflective context evaluation results
+# Reflective-context evaluation results
 
-This document records qualitative observations from evaluating rxpi's reflective
-context-management proof of concept. An observation may be provisional while a
-task is still running, and later transcript review may change its grade.
+This report records qualitative observations from the reflective-context-management
+proof of concept in rxpi. Grades are provisional until a session has been reviewed;
+they assess **context curation** only.
 
-All listed models were observed during the same long-running, independent agentic task
-whose end-to-end solution required at least ten times the model's context-window
-capacity in tokens. Some form of context management — pruning or compaction —
-was therefore unavoidable.
+The [separate C++ agent evaluation](https://github.com/bendelec/local-agent-cpp-eval/blob/main/evaluations/overview.md)
+covers each session's C++ project, architecture, code quality, and functional
+requirement coverage. Consult it to assess a model's C++ development capabilities,
+rather than this proof of concept's context-management results.
 
-## Summary
+Each candidate completed the same long-running, independent agentic task: an
+initial implementation round followed by two repair rounds in one main session.
+The task was designed to require at least ten times each model's context-window
+capacity, making context management unavoidable. That expectation held, or nearly
+held, for the long runs; Muse Glimmer completed unusually tersely and used
+substantially less than ten windows.
 
-| Model | Hosting / quantization | Subjective grade | Short summary |
-| --- | --- | --- | --- |
-| DeepSeek V4 Flash | Local Dwarfstar `ds4`; `dwarfstar-iq2` | 3/10 | It can use `prune_context` effectively after explicit user direction, but did not autonomously sustain curation: seven automatic compactions occurred, including four after its final reminder. |
-| DeepSeek V4 Flash | Venice (hosted); BF16 | 3/10 | Most autonomous curation intent observed, least effective execution: 18 self-initiated calls, one effective 42-block prune, fourteen silently absorbed no-ops, then six-plus harness force-compactions. |
-| Qwen3.8 27B | Local Lemonade; `UD-Q8-L-XL` | 5/10 | It made three substantial, deliberate cleanups after independently recognizing stale context, but then relied on six automatic compactions through the harder second half of the task. |
-| Laguna S 2.1 | OpenRouter (hosted); full precision | 3/10 | Responded to its only explicit hygiene nudge within one second, exactly as instructed — but the nudge raced the sixth compaction and lost by 3 ms. No proactive curation; five earlier buildups offered no nudge to respond to. |
-| Laguna S 2.1 | Local ds4 (revived); sigQ8/Q4K, guarded | 3/10 | Only field model to attempt curation before pressure — correct block ids in a comma-joined string, rejected by the instructive error, then permanent abandonment; four forced compactions. |
-| Muse Glimmer 30B | Local Lemonade; `UD-Q8_K_XL` | 4/10 | The field's best-executed curation under the hygiene nudge: six incremental prunes, 71.6% → 16%, zero compactions, zero output truncations — but purely pressure-triggered, and two prunes discarded its own repair-round working set. |
+## Results at a glance
 
-## Observations by model
+| Model | Hosting / quantization | Curation grade | Main finding |
+| --- | --- | ---: | --- |
+| DeepSeek V4 Flash | Local Dwarfstar `ds4`; `dwarfstar-iq2` | 3/10 | It pruned effectively after explicit user direction, but never sustained curation on its own. Four automatic compactions followed its last successful cleanup. |
+| DeepSeek V4 Flash | Venice (hosted); BF16 | 3/10 | It showed the most autonomous intent, but the old tool contract silently accepted fourteen empty selections. One 42-block prune was effective; roughly six force-compactions still followed. |
+| Qwen3.8 27B | Local Lemonade; `UD-Q8-L-XL` | 5/10 | It made three substantial, deliberate cleanups, then relied on six automatic compactions through the more difficult second half of the task. |
+| Laguna S 2.1 | OpenRouter (hosted); full precision | 3/10 | It followed its only hygiene nudge correctly within one second, but the nudge and sixth compaction raced; compaction won by 3 ms. Earlier buildups produced no nudge. |
+| Laguna S 2.1 | Local ds4 (revived); sigQ8/Q4K, guarded | 3/10 | It was the only model other than Qwen3.8 27B and Qwen 3.8 Flash to attempt curation before capacity pressure. Its block choices were correct, but it supplied a comma-separated string instead of an array and never tried again. |
+| Muse Glimmer 30B | Local Lemonade; `UD-Q8_K_XL` | 4/10 | It responded well to the hygiene nudge: six incremental prunes reduced use from 71.6% to 16%, avoiding all automatic compactions. It was never proactive, and two prunes removed active repair material. |
+| Qwen 3.8 Flash | Local llama.cpp (EngramHalo fork); `AP-Q5_K_XL` + MTP | 7/10 | It was the first model to curate at a work-package boundary well before pressure, used `summarize_context` appropriately, and selected blocks well. Its initiative then declined, and a single automatic compaction degraded both the C++ result and subsequent curation. |
+
+## Current findings
+
+The Qwen 3.8 Flash session is the most informative result so far. It is the first
+run with live post-prune accounting and the first to use `summarize_context`. It
+also provides the clearest comparison of the two context-management strategies in
+one task:
+
+- Before automatic compaction, model-led curation preserved a lean, useful working
+  set while both session execution and C++ work remained strong.
+- After automatic compaction replaced most history with one monolithic summary,
+  the model lost both detailed project understanding and a useful inventory for
+  further curation. An explicit intervention and an 87-block prune later rebuilt a
+  usable context.
+- The same model did not sustain its early initiative. It curated unprompted once,
+  then mostly responded to hygiene warnings. The present harness can support
+  proactive curation, but the behavior does not yet appear to be a stable model
+  habit.
+
+These observations are encouraging but preliminary. They do not establish that
+context curation improves all models or tasks, nor do they isolate model quality,
+serving configuration, and harness behavior from one another.
+
+## Evaluation records
 
 ### DeepSeek V4 Flash — local Dwarfstar `ds4`, `dwarfstar-iq2`
 
-**Status:** Final grade: **3/10**.
+**Final curation grade: 3/10.**
 
-The completed session had seven automatic compactions. The model made six
-`prune_context` calls: three bare listing-mode calls and three effective
-exclusions of 13, 5, and 88 stale blocks respectively, each following
-explicit user intervention about context management — demonstrating that it
-can inspect the block list and prune effectively when directed.
+The completed session required seven automatic compactions. The model made six
+`prune_context` calls: three old-contract listing-mode calls and three effective
+exclusions of 13, 5, and 88 stale blocks. Each effective cleanup followed an
+explicit user intervention about context management. This demonstrates that the
+model could inspect the block list and make useful selections when directed.
 
-It did not sustain that behavior. After the final, successful 88-block cleanup,
-it allowed four more automatic compactions without another pruning pass. Its
-reasoning repeatedly recognized the issue, but deferred it for “one more edit”
-or investigation. This is a follow-through failure rather than evidence that
-the tool is unusable.
+It did not maintain that behavior. After the final 88-block cleanup, it allowed
+four further automatic compactions without another curation pass. Its reasoning
+often recognized the problem, but deferred it for “one more edit” or another
+investigation. The main failure was follow-through, not inability to use the tool.
 
-Session review found 28 candidate re-reads after exclusion. Most followed fresh
+Transcript review found 28 candidate re-reads after exclusion. Most followed new
 external verification requests and were appropriate re-validation of files that
-had become relevant or changed; they do not materially lower the grade. The
-principal failure was late or absent pruning, not reckless pruning.
+had become relevant or changed. They do not materially affect the grade.
 
-A 3/10 reflects demonstrated tool competence under direct guidance, but no
-reliable autonomous or sustained context curation. It is unsuitable as evidence
-that the current prompts alone cause models to manage context proactively.
+The 3/10 grade reflects demonstrated tool competence under direct guidance, but
+no reliable autonomous or sustained curation. This run is not evidence that the
+current prompts alone produce proactive context management.
 
 ### DeepSeek V4 Flash — Venice-hosted, unquantized BF16
 
-**Status:** Final grade: **3/10** (opposite profile of the IQ2 run).
+**Final curation grade: 3/10.** This is the inverse profile of the local
+Dwarfstar IQ2 DeepSeek V4 Flash run.
 
-This session showed the most autonomous curation intent of any evaluated so
-far, and the least effective execution. The model made 18 self-initiated
-`prune_context` calls without any user direction. Exactly one was effective:
-an early, reasoned 42-block exclusion of stale requirement reads and
-exploration output. One call used a hallucinated id. The remaining calls —
-fourteen — passed `{"ids": []}` and were each answered by the pre-split
-contract's success-shaped `Pruned 0 block(s).` no-op. The model perceived
-context pressure and repeatedly attempted action that the interface silently
-absorbed.
+This model showed the strongest autonomous intent among the evaluated models and
+the weakest execution. It made 18 self-initiated `prune_context` calls without user direction.
+One early, reasoned exclusion of 42 stale requirement reads and exploration blocks
+worked. One call used a hallucinated ID. The remaining fourteen calls passed
+`{"ids": []}`; the pre-split interface answered each with the success-shaped
+no-op `Pruned 0 block(s).` The model perceived pressure and repeatedly attempted
+action, but the interface provided no clear failure signal.
 
-The context reached the compaction ceiling repeatedly: nine compaction
-entries, of which six are genuine force-compactions. The trailing
-triple (19:09/19:22/19:34, tokensBefore 124582 -> 124176 -> 115128) is a
-failure-retry cascade of the known compaction reservation defect —
-physically impossible as genuine refills at the session's observed generation and tool-traffic rates — and is
-not counted as three separate failures.
+The session contains nine compaction entries, six of which are genuine
+force-compactions. The final three entries (19:09, 19:22, and 19:34; `tokensBefore`
+124582 → 124176 → 115128) are a retry cascade caused by the known compaction
+reservation defect. Given the observed generation and tool-traffic rates, they
+cannot represent three separate context refills and are not counted as three
+failures.
 
-No subagents were used (contrast Qwen 3.8's five delegated sessions and the
-IQ2 run's four verification passes): all work happened in the main session.
-The run produced the most output tokens of the evaluated field
-(968k) alongside the least effective curation, and its reasoning was the
-most stable tier (reconsideration markers 0.30 per 1k output tokens, level
-with Qwen, versus the IQ2's 1.35) — stability did not translate into curation
-effectiveness.
+No subagents were used, unlike Qwen 3.8 Flash's five delegated sessions and the
+local Dwarfstar IQ2 DeepSeek V4 Flash run's four verification passes. The session
+produced the evaluation's largest output (968k tokens) and least effective curation.
+Its reconsideration rate was among the most stable—0.30 markers per 1k output
+tokens, equal to Qwen3.8 27B and well below the local Dwarfstar IQ2 DeepSeek V4
+Flash run's 1.35—so stable reasoning did not translate into effective curation.
 
-3/10 reflects genuine autonomous intent and one competent large prune,
-undermined by interface-shaped failure modes and no sustained effect: the
-harness still force-compacted the context roughly six times after the
-model's attempts.
+The 3/10 grade recognizes genuine autonomous intent and one competent large
+prune, but the harness still had to compact roughly six times after those attempts.
 
 ### Qwen3.8 27B — local Lemonade, `UD-Q8-L-XL`
 
-**Status:** Final grade: **5/10**.
+**Final curation grade: 5/10.**
 
-At 70.9% context use, without user intervention, the model decided to curate
-its context before beginning its next work package. It listed the blocks,
-identified stale exploration and build output, and selected blocks deliberately.
+At 70.9% context use, without user intervention, the model chose to curate before
+starting its next work package. It listed blocks, identified stale exploration and
+build output, and selected blocks deliberately.
 
-Its first three selection calls failed because it emitted a nested `ids` object
-rather than the required array. It then persisted with the same malformed shape
-even after a user supplied the correct syntax. This is a real tool-use weakness,
-but is materially mitigated by rxpi's then-untyped tool schema: the model was
-told only that `ids` accepted `Any`, despite the tool requiring an array of
-strings. DeepSeek V4 Flash did not encounter this problem, but the schema was
-still an avoidable contract ambiguity. After a session interruption and
-resume, it made its first successful array-form selection — 62 blocks — and
-later two further deliberate selections of 43 and 67 blocks.
+Its first three selection calls used a nested `ids` object instead of the required
+array. It persisted with that malformed shape even after the user supplied the
+correct syntax. This was a real tool-use weakness, but the then-untyped schema
+said only that `ids` accepted `Any`, despite the tool requiring an array of
+strings. The contract was therefore avoidably ambiguous. After interruption and
+resume, the model successfully selected 62 blocks, then made two further
+deliberate selections of 43 and 67 blocks.
 
-The model consciously retained some potentially valuable context and excluded
-other material on the basis that source files remain available for re-reading.
-That trade-off need not match a human's exact selection to count as competent
-forward-looking curation. The initial syntax failures are therefore not a
-material score deduction: the exposed schema was ambiguous, and the model used
-the corrected contract successfully.
+The model explicitly kept material that might remain valuable and removed content
+that could be reread from disk. That trade-off need not match a human's exact
+selection to count as competent forward-looking curation. The initial syntax
+failures are consequently not a material score deduction: the exposed contract
+was ambiguous, and the corrected contract was used successfully.
 
-The trigger was still capacity pressure: Qwen considered curation only after
-context use reached 70.9%. This is acceptable, but not ideal. Dead context can
-degrade attention and therefore output quality even when capacity is ample. A
-score above 8/10 requires treating context hygiene as an independent goal: the
-model should consider pruning at implementation-plan milestones, topic changes,
-or other natural boundaries that make stale material clearly less valuable for
-the planned work.
+The trigger was still capacity pressure. The model did not consider curation until
+70.9% use. A higher score requires treating context hygiene as an independent
+quality goal at plan milestones, topic changes, and other natural boundaries, not
+only as a response to imminent capacity loss.
 
-It did not sustain the promising initial behavior. After the third cleanup, it
-allowed six automatic compactions, repeatedly continuing through 80–97% context
-use without making another pruning selection. At 88.5%, it explicitly chose to
-write a comprehensive completion report instead of curating and immediately
-triggered compaction. At 95%, it called `prune_context` only after compaction
-had already reduced the context, then mistakenly credited the listing call for
-the reduction and selected nothing.
+The behavior also did not last. After its third cleanup, the model allowed six
+automatic compactions. At 88.5%, it chose to write a comprehensive completion
+report rather than curate and immediately triggered compaction. At 95%, it called
+`prune_context` after compaction had already reduced the context, credited the
+listing call with the reduction, and made no selection.
 
-One compaction attempt also failed when recorded context use reached 124,600
-tokens: adding the compaction prompt and system instructions exceeded Qwen's
-131,072-token input limit. The user temporarily switched to a larger-context
-model to perform that compaction. This is an inherited harness reserve failure,
-not a Qwen failure, and does not lower the grade.
+One compaction attempt failed at 124,600 recorded tokens because the compaction
+prompt and system instructions exceeded Qwen3.8 27B's 131,072-token input limit.
+The user temporarily selected a larger-context model to perform the compaction.
+This was an inherited harness-reserve failure, not a Qwen3.8 27B failure.
 
-A 5/10 reflects real autonomous and deliberate pruning early in the task, but
-no durable hygiene habit through its difficult second half. This session used
-the original prompt; the strengthened quality-driven policy and >80% fallback
-instruction were introduced afterward and require separate evaluation.
+The 5/10 grade reflects substantial autonomous, deliberate pruning early in the
+task but no durable hygiene practice through the difficult second half. This
+session used the original prompt; the stronger quality-driven policy and the
+above-80% fallback instruction were introduced later.
 
 ### Laguna S 2.1 — OpenRouter-hosted (poolside), full precision
 
-**Status:** Final grade: **3/10**.
+**Final curation grade: 3/10.**
 
-Completed all three rounds in one session with two subagent delegations,
-both correctly on the evaluated model: a focused code review of the
-avoidance-region changes and a docs-consistency check during the final
-repair round. It never misused a tool: zero malformed calls, zero
-hallucinated ids, zero no-op calls.
+The model completed all three rounds in one session and delegated two focused
+subtasks, both to the evaluated model: a review of the avoidance-region changes
+and a documentation-consistency check during the final repair. It made no malformed
+tool call, hallucinated no ID, and made no no-op curation call.
 
-Six automatic compactions carried the session (98k–120k tokens before
-each); `prune_context` and `summarize_context` were never effectively
-executed. Its first `list_context` (orientation) was the name-slotting
-miscall also observed locally — expecting a repository file listing,
-self-correcting immediately. Its second, deep in repair round 2, was a
-correct, immediate response to the explicit hygiene nudge: the session's
-only hygiene message fired at 91.9% (19:25:18.850) in the same turn
-boundary as the sixth compaction (19:25:18.847 — the compaction won by
-3 ms), and the model answered it one second later with the instructed
-behavior: list the blocks, prune what is no longer needed. The listing
-showed the already-compacted context — four fresh blocks, nothing stale
-— and it correctly declined and returned to work. The five earlier
-compactions fired at gradual 75%-crossings where the 80% hygiene tier
-was preempted by the raised compaction reserve (32k), so no earlier
-nudge existed to respond to.
+Six automatic compactions carried the session, each at 98k–120k tokens before
+compaction. `prune_context` and `summarize_context` were never effectively
+executed. The first `list_context` was an orientation mistake also seen in the
+locally served Laguna S 2.1 run: the model expected a repository file listing and
+corrected itself immediately.
 
-Notable outside the curation axis: the most output-efficient completion
-measured (571k output tokens versus 644k–968k for the other models), heavy
-reasoning use (454k thinking tokens, 79% of its output, including coherent
-32k-token turns), and effective work from compaction
-summaries it never requested. Reconsideration markers 0.80 per 1k
-output tokens — the second most hesitant model in the field, consistent
-with the local repetition-attractor anatomy: the temperament that stays
-a trait at full precision collapsed into a 41-cycle attractor on the
-local quant through an unguarded sampler (see the local run's serving
-note below).
+The second listing was a correct response to the only hygiene nudge. The nudge
+fired at 91.9% at 19:25:18.850, in the same turn boundary as the sixth compaction
+at 19:25:18.847. The model followed the instruction one second later: it listed
+blocks, found the already-compacted context contained only four fresh blocks, and
+correctly declined to prune. The earlier five compactions occurred during gradual
+buildups at the 75% compaction line. The 80% hygiene tier had been preempted by
+the raised 32k reserve, so no earlier nudge existed to answer.
 
-3/10 reflects demonstrated responsiveness to the harness's explicit
-curation instruction — immediate, correct, and following its script —
-with the execution consumed by a harness race (exempt per the Qwen
-compaction-rescue precedent), and no opportunity to demonstrate
-proactive curation: the signals were structurally preempted until the
-racing moment.
+Outside the curation axis, this was the most output-efficient completion: 571k
+output tokens, versus 644k–968k for the other models then measured. It used 454k
+thinking tokens (79% of output), including coherent 32k-token turns, and used
+compaction summaries effectively despite never requesting them. Its
+reconsideration rate was 0.80 per 1k output tokens, second highest among the
+evaluated models. The OpenRouter full-precision model retained a trait that
+collapsed into a 41-cycle attractor on the local ds4 quantization; see the local
+serving note below.
+
+The 3/10 grade reflects immediate and correct response to the harness instruction,
+with the action consumed by a documented harness race. The model had no opportunity
+to demonstrate proactive curation because the signals were structurally preempted
+until that race.
 
 ### Laguna S 2.1 — local ds4 (revived branch), sigQ8/Q4K, repetition-guarded
 
-**Status:** Final grade: **3/10**.
+**Final curation grade: 3/10.**
 
-A single ~24-hour session, no subagents: initial prompt,
-two repair prompts, several short continue-nudges, and one early
-thinking-style steering message. It is the only run in the field that
-attempted context curation *before* capacity pressure: early in
-orientation, unprompted, with no context-status signal in the session at
-all, it listed the context and attempted a prune selecting four correct
-block ids from that listing — passed as a comma-joined string rather than
-the required array. The strict contract answered with the instructive
-error ("'ids' must be an array of block ids from list_context"); the model
-listed once more and never attempted another prune through the remaining
-~24 hours and four buildups to the compaction line. The failure was one of
-argument structure, not selection or semantics — consistent with the
-model's broader structural tool-use weakness: its file edits repeatedly
-left duplicated or missing lines at edit edges, several times badly enough
-that it rewrote source files from scratch.
+This was a single approximately 24-hour session with no subagents: the initial
+prompt, two repair prompts, several short continue nudges, and one early
+thinking-style steering message. It is the only model other than Qwen3.8 27B and
+Qwen 3.8 Flash to attempt curation before capacity pressure. Early in orientation, with no context-status message,
+it listed the context and selected four correct block IDs. It sent them as a
+comma-separated string rather than the required array. The strict contract returned
+an instructive error—`'ids' must be an array of block ids from list_context`—and
+the model never attempted another prune across the remaining four approaches to
+the compaction line.
 
-No hygiene nudge ever fired in this run: the binary predated the derived
-70% threshold, so the 80% nudge tier sat permanently behind the 75%
-compaction line. As with the hosted run's preempted buildups, the absence
-of nudge-responses is not held against the model.
+This was an argument-encoding failure, not a selection failure. It matches the
+model's broader structural tool-use weakness: edits repeatedly left duplicated or
+missing lines at edit boundaries, several times badly enough to require rewriting
+source files from scratch.
 
-Four threshold compactions carried the session (98.4k–99.7k tokens before
-each), all produced by compact-smart; the first predates the transition
-preamble's deployment, the last three open with it — the deployed
-feature's first live test passed. The run produced the field's leanest
-output (281k tokens versus 571k–968k) and its calmest reconsideration rate
-(0.25 per 1k output tokens; the same model measured 0.80 hosted — the
-largest serving-dependent temperament shift observed in the field).
+No hygiene nudge fired. The binary predated the derived 70% threshold, leaving the
+80% nudge tier permanently behind the 75% compaction line. As in the
+OpenRouter-hosted Laguna S 2.1 run, absence of a response to a non-existent nudge
+is not held against the model.
 
-Serving support for this model is unsatisfactory: it is prone to attractor
-loops when quantized, which the mainstream serving options did not
-sufficiently catch. After no luck with several alternatives, it was finally
-hosted successfully on a branch of antirez's ds4 with our own simple
-repetition guardrails added — a presence penalty over a session-token
-window, enabled for this model family only. Under that guardrail every
-monitored long turn of this run stayed clean, including 16k-token outputs;
-the guardrail is a serving condition, not model merit. Two mid-work turn
-resets by the user around a test-code confusion phase are recorded as
-interventions; C++ content quality is graded separately.
+Four threshold compactions carried the session (98.4k–99.7k tokens before each),
+all produced by compact-smart. The first predates deployment of the transition
+preamble; the final three include it, and that first live test passed. The run
+produced the least output among the non-Glimmer sessions (281k tokens) and the
+calmest reconsideration rate, 0.25 per 1k output tokens. The OpenRouter-hosted
+Laguna S 2.1 run measured 0.80, the largest serving-dependent temperament shift in
+the evaluation.
 
-3/10 reflects the field's only pre-pressure curation intent, genuine and
-correctly targeted; its failure was structural argument encoding, and it
-was followed by permanent abandonment after a single instructive error.
-Four forced compactions completed the session.
+Serving this model locally was difficult. Quantized deployments were prone to
+attractor loops that mainstream serving options did not catch. It was eventually
+served on a branch of antirez's ds4 with a simple family-specific repetition guard:
+a presence penalty over a session-token window. Every monitored long turn in this
+run, including 16k-token outputs, stayed clean. The guard is a serving condition,
+not model merit. Two user turn resets during test-code confusion are recorded as
+interventions.
+
+The 3/10 grade reflects genuine, correctly targeted pre-pressure intent followed
+by permanent abandonment after one structural error. Four forced compactions then
+completed the session.
 
 ### Muse Glimmer 30B — local Lemonade, `UD-Q8_K_XL`
 
-**Status:** Final grade: **4/10**.
+**Final curation grade: 4/10.**
 
-A single session spanning initial and both repair rounds: 66 assistant
-turns, no subagents, and the field's leanest run by an order of magnitude
-(57k output tokens; the field spans 281k–968k).
+One session covered the initial and both repair rounds: 66 assistant turns, no
+subagents, and 57k output tokens—the evaluation's leanest run by an order of
+magnitude.
 
-Curation was purely pressure-triggered — but the pressure path worked
-end to end for the first time in the field. Round one climbed to 52.8%
-with no curation attempt; the repair round crossed the derived hygiene
-threshold (70% under the 32k reserve), the nudge fired at 71.2%, and the
-model began pruning within three minutes: six incremental `prune_context`
-calls over 30 minutes (8–10 blocks each, 58 blocks total), taking context
-from 71.6% to 16.0%. This is the derived-threshold fix's first live
-validation: the nudge preceded the compaction line, the model responded,
-and the session finished with **zero automatic compactions** — the only
-field model to avoid them — and zero output-limit truncations (maximum
-turn 13,035, ~40% of the cap; every predecessor hit its output cap on day
-one).
+Its curation was entirely pressure-driven, but the pressure path worked end to
+end. Round one reached 52.8% with no curation. During repair, the derived hygiene
+threshold fired at 71.2%, and the model began pruning within three minutes. It
+made six incremental `prune_context` calls over 30 minutes, removing 8–10 blocks
+at a time (58 total) and reducing context use from 71.6% to 16.0%.
 
-Retroactive re-acquisition accounting over its six prunes (the mechanism
-was not yet live; the analysis is reconstructed from the session file):
-four prunes had clean windows, two discarded working-set material — the
-model re-read its own `implementation-plan.md` and `tests/test_basic.cpp`
-within the window, exactly the repair round's subject matter. Selection
-was otherwise correct: mostly older read-results, cleared in deliberate
-small steps rather than a panic amputation.
+This is the first live validation of the derived-threshold change: the warning
+preceded compaction, the model responded, and the session ended with no automatic
+compactions. It is the only evaluated run to avoid them entirely. It also had
+no output-limit truncations; its longest turn was 13,035 tokens, about 40% of the
+cap. Every other model evaluated to date reached the 32,768-token cap early in its
+initial round, usually on the first long thinking turn after short orientation turns
+that read the workspace structure and requirements documents.
 
-A distinctive reasoning profile accompanies this: simplification markers
-at 3.15 per 1k thinking tokens (the rest of the field: 0.47–1.13 — an
-order-of-magnitude-family difference), and three spontaneous "given
-limited time" deliberations (two in round-one design, one at the repair
-round's opening) with no time language anywhere in the prompt — the
-model's controllable-effort training prior, expressed three ways: budget
-vocabulary, scope-trading deliberation, and output self-discipline.
-Reconsideration markers 0.00 per 1k output tokens — the field's calmest,
-against a range of 0.25–1.35.
+Retroactive re-acquisition accounting reconstructed from the session file found
+four clean windows and two working-set mistakes. The model reread its own
+`implementation-plan.md` and `tests/test_basic.cpp` after pruning them; both were
+central to the repair round. Apart from those mistakes, the selections were sound:
+mostly older read results removed in deliberate small steps rather than a panic
+reset.
 
-The C++ evaluation (graded separately, per the established split) scored
-the run 35/100 initially and 36/100 after both repair rounds — the
-reflex's cost side: the simplification profile that kept the session lean
-also produced the round-one findings of naive architecture and
-near-absent tests, and the repair round recovered a single point. The
-repair prompt deviated from the standard format by one soft sentence
-encouraging less worry about time and scope (recorded per protocol; the
-time vocabulary recurred once at the repair round's first turn, then was
-silent for the remaining forty).
+The run had a distinctive reasoning profile: simplification markers at 3.15 per
+1k thinking tokens, compared with 0.47–1.13 for the other evaluated models, and
+three unprompted “given limited time” deliberations. This same controllable-effort prior
+appeared as budget vocabulary, scope trade-offs, and output restraint. Its
+reconsideration rate was 0.00 per 1k output tokens, the evaluation's lowest.
 
-4/10 reflects the field's best-executed curation response — immediate,
-sustained, correctly targeted except for two working-set misses, and
-sufficient to prevent every forced compaction — while remaining strictly
-a response to the capacity nudge, with no boundary-initiated curation
-anywhere in the run.
+The 4/10 grade recognizes the best pressure-triggered curation observed in this
+evaluation: timely, sustained, mostly well targeted, and sufficient to prevent
+forced compaction. It
+remained a response to a warning, not curation initiated at a work-package
+boundary.
+
+### Qwen 3.8 Flash — local llama.cpp (EngramHalo fork), `AP-Q5_K_XL` + MTP
+
+**Final curation grade: 7/10.**
+
+#### Serving and protocol
+
+The model ran through llama.cpp on the EngramHalo fork (Strix Halo, ROCm), with
+an `AP-Q5_K_XL` main model; an `easiix Q8_0` MTP draft model; an SSD-mapped
+n-gram engram table; KV q8_0; the FA vector kernel; and
+`draft-mtp,ngram-mod` speculative decoding. The protocol setting was xhigh:
+the template supports `low`, `medium`, and `xhigh`, with `high` remapped to
+`xhigh` as its closest equivalent. The GGUF's embedded sampling defaults applied
+(temperature 1.0, top-k 20, top-p 0.95), because pi sends no sampling parameters
+unless configured. Throughput was approximately 15–20 tokens/second with
+acceptance-discounted MTP.
+
+This was the first run on a live-instrumented harness. A surgical session reset
+introduced post-prune accounting during the session, so only later prune windows
+have live verdicts.
+
+#### Initial round: strong implementation and deliberate curation
+
+The initial round produced 218 assistant turns and 243k output tokens.
+
+At 47% context use, without a hygiene warning, at a completed work-package
+boundary, the model called `list_context` and pruned stale requirement-document
+reads. Its reasoning was explicit: the documents remained on disk and could be
+reread if needed. This is the evaluation's clearest boundary-initiated curation
+event and the behavior that the Qwen3.8 27B record identifies as necessary for a score
+above 8/10.
+
+The initial round contained five prune calls. They submitted 14, 17, 75, 68, and
+53 IDs, excluding 8, 17, 58, 58, and 48 blocks respectively. Each curation event
+was preceded by `list_context`. The model also made the series' first
+`summarize_context` call, using it appropriately: it summarized irreplaceable
+conversational material—the subagent-review conclusions—and pruned file reads that
+could be reacquired from disk. It used summaries to preserve value, not merely to
+remove tokens.
+
+The native-only accounting reported no `read` or `edit` of an excluded file within
+15 turns for the 58-, 58-, and 48-block prunes. A shell-aware audit found that
+some files represented in those excluded blocks were reread through `bash` within
+the same windows. A later 87-block recovery prune did not complete an accounting
+window before the session ended.
+
+The post-series audit recorded additional re-acquisition: requirements documents
+from the first prune were reread nine minutes after exclusion, and documents plus
+`simulation.cpp` from the 48-block prune were reacquired for remaining
+documentation work. One further window contained only a 95-character exception.
+The current ledger does not observe shell-mediated reads such as `sed` and `grep`;
+bash-aware accounting is queued after the series.
+
+A separate mechanical weakness affected several selections. Across five prune
+calls, approximately 30 submitted IDs were unknown. Every one was a corrupted copy
+of a real ID: dropped digits, transpositions, near-character substitutions, an
+embedded space, or one stale already-pruned ID. Corrupted forms then propagated
+through the model's own later reasoning. The model never fabricated an ID, and
+paths, code, and diffs were copied correctly. The operator therefore recorded this
+as a general weakness with long digit strings, not as a curation-selection defect.
+Harness validation made the consequence zero. It is recorded but not scored.
+
+#### First repair: degradation after automatic compaction
+
+From the first repair prompt, the model's initiative weakened. It still curated
+when the hygiene warning appeared, and it executed those actions well, but it no
+longer acted early at work-package boundaries. Repair work also added diagnostic
+reasoning and diff/test residue with no disk original, so its successful
+round-one strategy of rereading files could no longer remove enough context.
+
+At 98,728 tokens, automatic compaction ran. The resulting context had 17 blocks,
+one of them a machine summary representing the entire project history. Two effects
+followed from this same loss of detailed context:
+
+- **C++ work degraded.** The model reconstructed project scope from
+  summary-level requirements and implemented unrequested features. Those scope
+  confabulations introduced regressions that the second repair later removed;
+  the final repair described all three defects as fixed by deletion.
+- **Curation degraded.** Inventory-based selection no longer had useful objects to
+  act on. A single, unprunable project-history summary cannot be selectively
+  curated. As context grew again, the model made 5-ID gestures rather than
+  rebuilding a working set.
+
+An operator interruption prevented one further compaction. After an explicit hint
+to curate proactively, the model made an 87-block prune. That action rebuilt a
+lean, self-curated context. The final repair then ran cleanly, briefly, and without
+further curation. The model did not itself degrade and recover; its available
+context did.
+
+The compaction also removed, or summarized too tersely to preserve, build-location,
+CMake-structure, and testing-convention details that the model's earlier curation
+had deliberately retained. While evaluating the output, the C++ task operator
+accidentally deleted the project's `./build/` directory. With no clear build
+information in its context or project directory, the model confabulated the
+fictitious root path `/home/will_cohen/reporting`, which appeared in none of its
+inputs, instead of checking its current directory. It listed the parent directory,
+thereby exposing similarly named directories for the other evaluated candidates,
+and then found `/tmp` build directories created by the operator and evaluator while
+testing candidates. Those were not this candidate's build directories.
+
+The operator aborted the session before the model could act on those findings,
+restored `./build/`, and reset the session to immediately before the first attempt
+to find `/home/will_cohen/reporting`. A short corrective prompt stated that `./build/`
+had been removed accidentally and instructed the model to reconfigure with CMake
+before continuing. Audits of the main and all subagent sessions found no other
+boundary event.
+
+#### Interpretation
+
+This session provides two linked signals.
+
+1. **Model-led curation has a measurable advantage.** Before compaction, the model
+   maintained a useful working set while both C++ quality and session behavior
+   remained strong. After the monolithic compaction summary replaced that working
+   set, both deteriorated. The 87-block recovery prune restored a lean context and
+   a clean final round.
+2. **Proactive curation was not durable.** Even the strongest candidate initiated
+   curation once, then became warning-responsive and later missed the opportunity
+   altogether. GPT-5.6 Terra shows the same broad pattern: competent curation when
+   reminded, not sustained initiative.
+
+The implications have two layers. On the harness side, experiments should test
+boundary-timed nudges, more salient accounting verdicts, and a post-compaction
+context made of topical, selectable summaries rather than one monolith. On the
+model side, proactive context hygiene may require post-training; it does not yet
+appear to be behavior reliably sampled by models trained around traditional
+compaction. Both self-initiated events observed in the evaluation came from Qwen3.8
+models—Qwen3.8 27B at 70.9% before the warning threshold and Qwen 3.8 Flash at 47%
+before pressure—which is notable but not enough evidence to establish a
+family-level trait.
+
+The session used eight delegated subagent sessions: two parallel pairs, plus
+review and documentation checks in the repair rounds. One parallel pair lost two
+members to KV-pool exhaustion: at 63.4% main-session context, approximately 16k
+tokens remained per subagent against roughly 10k tokens of fixed prompt overhead.
+The surviving solo documentation check ran at approximately 97% pool occupancy.
+One subagent failure was attributed to an upstream speculative-batch bug in the
+`#24840` class (`spec_i_batch` not shifted by view offset), patched in the fork
+mid-series.
 
 ## Session comparison
 
-All evaluated runs: identical initial prompt and workspace, one initial
-round plus two repair rounds in the same main session; subagent sessions
-started after the main are included; all other sessions are excluded.
-Reconsideration markers: "but wait", "hold on", "on second thought",
-"scratch that", "let me reconsider", "actually, let me", "wait, no" per 1k
-output tokens across thinking and text.
+The table covers the main session and eligible subagents only. The main session is
+the last-created session beginning with the standard implementation prompt;
+subagents are sessions created after it whose first message matches a `run` call in
+the main session. All other sessions are excluded. A turn is an assistant message.
+Prompt and output tokens are summed across qualifying sessions.
 
-| model | serving | grade | main session | subagent sessions | turns | prompt tokens | output tokens | reconsideration/1k |
-|---|---|---|---|---|---|---|---|---|
-| DeepSeek V4 Flash (IQ2) | ds4, antirez IQ2 mixed | 3/10 | `01a00bb1` | 4 (verification passes) | 457 | 20.59M | 644k | 1.35 |
-| DeepSeek V4 Flash (unquantized) | Venice (hosted), BF16 | 3/10 | `01a03896` | none | 421 | 30.00M | 968k | 0.30 |
-| Qwen 3.8 27B | Lemonade, UD-Q8-L-XL | 5/10 | `01a01b54` | 5 (work-package delegation) | 806 | 51.16M | 961k | 0.30 |
+Reconsideration markers are `but wait`, `hold on`, `on second thought`, `scratch
+that`, `let me reconsider`, `actually, let me`, and `wait, no`, counted in
+assistant thinking and text per 1k output tokens.
+
+| Model | Serving | Grade | Main session | Subagent sessions | Turns | Prompt tokens | Output tokens | Reconsideration / 1k |
+|---|---|---:|---|---|---:|---:|---:|---:|
+| DeepSeek V4 Flash (local Dwarfstar IQ2) | ds4, antirez IQ2 mixed | 3/10 | `01a00bb1` | 4 (verification passes) | 457 | 20.59M | 644k | 1.35 |
+| DeepSeek V4 Flash (Venice-hosted BF16) | Venice (hosted), BF16 | 3/10 | `01a03896` | none | 421 | 30.00M | 968k | 0.30 |
+| Qwen3.8 27B | Lemonade, UD-Q8-L-XL | 5/10 | `01a01b54` | 5 (work-package delegation) | 806 | 51.16M | 961k | 0.30 |
 | Laguna S 2.1 (hosted) | OpenRouter, full precision | 3/10 | `01a067fc` | 2 (review, docs check) | 409 | 22.77M | 571k | 0.80 |
 | Laguna S 2.1 (local) | ds4 revived, sigQ8/Q4K + guardrail | 3/10 | `01a06705` | none | 411 | 20.56M | 281k | 0.25 |
 | Muse Glimmer 30B | Lemonade, UD-Q8_K_XL | 4/10 | `01a07220` | none | 66 | 3.40M | 57k | 0.00 |
+| Qwen 3.8 Flash | llama.cpp fork, AP-Q5_K_XL + MTP | 7/10 | `01a0779f` | 8 (review/doc-check, two parallel pairs) | 643 | 33.75M | 594k | 0.08 |
 
-## Methodology notes
+## Method and harness notes
 
-Setup reminder for lemonade-served models: the lemonade pi-plugin falls
-back to a 4,096-token output limit when the server reports none; a
-models.json `maxTokens` override restores envelope parity. Pre-apply the
-override when creating a candidate entry.
+### Evaluation conditions
 
-Mechanism observations that inform the proof of concept but do not belong
-per model are recorded in [`reflective-context-research-notes.md`](reflective-context-research-notes.md)
-(currently: a degenerate curation incident and the prune-manifest-as-memory
-finding).
+The protocol set every model to a 131,072-token context window and a 32,768-token
+output limit. When a served model advertised larger limits, pi's model
+configuration clamped it to those values so that the evaluations shared the same
+context and output envelopes.
 
-2026-09-03: Context-status staleness across compaction: the status value
-a model reasons against lags one turn behind a compaction that resolves
-the pressure. Laguna's only curation intent reacted to a 91.9% status one
-second after compaction had reduced the context to four fresh blocks.
-Models that act on current mid-buildup pressure (Qwen at 70.9%) curate
-successfully; models that react only at the boundary are nudged at the
-moment curation is pointless — and may learn that curation attempts are
-empty gestures. Backlog: surface the compaction event itself, or return
-the post-compaction status with the first post-compaction turn.
+One local-serving constraint required an exception: DeepSeek V4 Flash on antirez
+`ds4` used a 100,000-token context window. At 131,072 tokens, the model did not
+fit reliably in the host's 128 GB unified memory and caused serving-side
+out-of-memory failures. Its output limit remained 32,768 tokens.
 
-2026-09-03: Hygiene-nudge preemption and race, root cause: raising
-`compaction.reserveTokens` to 32k moved the auto-compaction line to 75%,
-below the hard-coded 80% hygiene-message threshold. Gradual buildups
-then compact before the hygiene message can ever fire (five of Laguna's
-six compactions had no nudge), and a turn that jumps past both thresholds
-emits the nudge in the same turn boundary as the compaction — Laguna's
-only nudge raced its compaction and lost by 3 ms, then the model's
-correct one-second response arrived to an already-compacted context.
-Earlier graded runs (16k reserve, 87.5% line) were unaffected: the
-80% tier sat below the line. Fix: derive the hygiene threshold from the
-compaction line (line minus five points, clamped) so the nudge always
-precedes compaction for any reserve.
+Lemonade's pi plugin falls back to a 4,096-token output limit when the server
+reports no limit. A `models.json` `maxTokens` override restores the intended
+32,768-token output limit and should be applied when a candidate is created.
 
-2026-09-01: The agent tool interface changed mid-evaluation. `prune_context`'s
-dual-mode contract (no-arguments listing plus ids-based exclusion) was split
-into a read-only `list_context` tool and a strictly mutating `prune_context`
-that fails loudly when ids are missing, after several models were observed
-calling the tool bare and then reporting that they had successfully pruned.
-Evaluations started before this change are not directly comparable to ones
-started after it.
+Mechanism observations that are not specific to one model are recorded in
+[reflective-context-research-notes.md](reflective-context-research-notes.md).
+The current notes cover a severe over-pruning incident and the
+prune-manifest-as-memory finding.
 
-The Laguna S 2.1 evaluation in progress at the time of the change was started
-under the old interface, interrupted, and continued under the new one. Its
-transcript spans both tool contracts, and its eventual grade must be read with
-that in mind.
+### Interface change during the series — 2026-09-01
 
-### Session accounting rebuilt mechanically (2026-09-03, overnight)
+`prune_context` originally combined two actions: no arguments listed blocks, while
+an `ids` argument excluded them. Several models called it without arguments and
+then reported that they had pruned successfully. The result looked successful even
+though it had only listed blocks.
 
-All quantitative claims were re-derived from the session files under a fixed
-protocol: the main session is the last-created session whose first user
-message is the standard implementation prompt; subagent sessions are those
-created after it whose first message matches a `run` tool call of the main;
-all other sessions are excluded. Turns
-are assistant messages; token totals sum per-request usage over the main and
-matched subagent sessions; reconsideration markers are counted only in
-assistant thinking and text.
+The interface was split into read-only `list_context` and strictly mutating
+`prune_context`. The latter now fails loudly when IDs are missing. Evaluations that
+began before the change are not directly comparable with later ones. The locally
+served Laguna S 2.1 evaluation was interrupted during this transition and continued
+under the new contract; its transcript includes both interfaces.
 
-Corrections from earlier drafts: reconsideration rates (IQ2 1.35, unquantized
-DS4F 0.30, Qwen 0.30 — earlier values 1.71/0.48/0.40 were inconsistently
-scoped), Laguna turns 409 (was 408), IQ2 prune calls six with three effective
-(was three), Laguna thinking volume 454k (was ~359k, and not the field's
-highest — the unquantized DS4F run reasoned 810k).
+### Context-status behavior around compaction — 2026-09-03
 
-Verified exact in the same pass: compaction counts and per-compaction
-context sizes for every run, the 13/5/88 and 62/43/67 block selections, the
-18-call unquantized-DS4F decomposition including the 42-block exclusion, the
-four compactions after the IQ2's final cleanup, and every subagent-session
-count in the comparison table.
+A context-status message can lag one turn behind a compaction that resolves the
+pressure. The OpenRouter-hosted Laguna S 2.1 run's only curation attempt reacted
+to a 91.9% status one second after compaction had reduced the context to four fresh
+blocks. Models that act during a buildup, such as Qwen3.8 27B at 70.9%, can curate
+effectively. Models that react only
+at the boundary may be prompted after curation has become pointless, and may learn
+that the action is empty. The backlog is to surface the compaction event itself or
+send post-compaction status with the first subsequent turn.
+
+Raising `compaction.reserveTokens` to 32k moved the automatic-compaction line to
+75%, below the old fixed 80% hygiene threshold. Gradual buildups therefore compacted
+before a hygiene message could fire; five of the OpenRouter-hosted Laguna S 2.1
+run's six compactions had no nudge. A single turn that passed both thresholds emitted
+the nudge and compaction at the
+same boundary, creating the documented 3 ms race. The threshold is now derived
+from the compaction line: five percentage points below it, clamped to the supported
+range. Earlier runs with a 16k reserve and an 87.5% compaction line were not
+affected.
+
+### Mechanical session accounting — 2026-09-03
+
+All quantitative claims were recalculated from session files under a fixed protocol.
+The main session is the last-created session beginning with the standard
+implementation prompt. Qualifying subagents are created after it and begin with a
+matching `run` call. Turns are assistant messages; token totals sum per-request
+usage across those sessions; reconsideration markers are counted only in assistant
+thinking and text.
+
+This pass corrected the following earlier figures: reconsideration rates for local
+Dwarfstar IQ2 DeepSeek V4 Flash, Venice-hosted BF16 DeepSeek V4 Flash, and Qwen3.8
+27B are 1.35, 0.30, and 0.30 respectively (previously 1.71, 0.48, and 0.40);
+OpenRouter-hosted Laguna S 2.1 has 409 turns rather than 408; the local Dwarfstar
+IQ2 run made six prune calls with three effective calls rather than three total; and
+the OpenRouter-hosted Laguna S 2.1 run used 454k thinking tokens rather than roughly
+359k. Venice-hosted BF16 DeepSeek V4 Flash remained the evaluation's largest
+reasoning run at 810k thinking tokens.
+
+The same pass verified all compaction counts and pre-compaction context sizes, the
+13/5/88 and 62/43/67 block selections, the 18-call decomposition of the
+Venice-hosted BF16 DeepSeek V4 Flash run including its 42-block exclusion, the four
+compactions after the local Dwarfstar IQ2 DeepSeek V4 Flash run's last cleanup, and
+every subagent count in the table.

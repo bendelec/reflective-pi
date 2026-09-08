@@ -1,87 +1,85 @@
-# Reflective context research notes
+# Reflective-context research notes
 
-Short notes on mechanism observations that inform the reflective-context
-proof of concept but do not belong to the per-model evaluation results.
-Linked from `reflective-context-results.md`.
+This document records mechanism-level observations that inform the
+reflective-context proof of concept but do not belong in a single model record.
+These are working research notes, not final conclusions. The per-model evidence and
+grades are in [reflective-context-results.md](reflective-context-results.md).
 
-## A degenerate curation incident, and what survived it (2026-09-05)
+## Severe over-pruning and recovery — 2026-09-05
 
-The vwmini master session (GPT-5.6 Terra, hosted; a working session, not an
-evaluation) pruned 139 of its 141 context blocks at 82.2% use, seconds after
-the context-hygiene footer fired and an operator "let's finish this"
-instruction. It kept only the operator sentence and the pruning operation's
-own bookkeeping. The session then continued correctly through evaluation
-wrap-up, repair-prompt preparation, commit, and push.
+A GPT-5.6 Terra working session on VWmini—not a formal evaluation—excluded 139 of
+its 141 context blocks at 82.2% use. The action followed the context-hygiene footer
+by seconds and coincided with an operator instruction to “let's finish this.” It
+kept only that instruction and the pruning operation's own bookkeeping.
 
-This is not recorded as a success. The trigger was the capacity nudge, not
-the model's initiative; the execution destroyed the active working set; and
-the continuation was carried by environmental preconditions rather than by
-the quality of the prune. What the incident demonstrates is the robustness
-floor of the design: a worst-case prune recovered without functional loss.
+The session nevertheless completed evaluation wrap-up, repair-prompt preparation,
+commit, and push. This is **not** a curation success: the model reacted to pressure
+rather than acting on its own initiative, discarded active working material, and
+continued only because the environment still provided enough external state.
 
-Numbers: the hygiene footer fired at 82.2% at 18:26:10Z; the prune executed
-at 18:26:38Z; 141 blocks in, 2 kept; context fell from 223,587 tokens to
-12,260 (4.5%); the subsequent re-orientation sweep (git status, re-reads of
-the evaluation record, the repair prompt, and the completion report, plus a
-re-run of the formatter diagnostics) rebuilt context to 54,608 tokens
-(20.1%) within three minutes. Roughly 42k tokens were re-ingested, much of
-it re-reading material whose blocks had just been excluded. In this
-environment over-pruning does not lose information; it converts context
-tokens into re-read tokens and latency.
+### Observed recovery cost
 
-### Finding 1: the prune manifest is retained memory
+| Event | Observation |
+| --- | --- |
+| Hygiene footer | 82.2% at 18:26:10Z |
+| Prune | 18:26:38Z; 141 blocks before, 2 retained |
+| Context after prune | 223,587 → 12,260 tokens (4.5%) |
+| Immediate recovery | Reorientation, rereads, and formatter diagnostics rebuilt context to 54,608 tokens (20.1%) within three minutes |
+| Re-ingested material | Approximately 42k tokens, much of it from blocks just excluded |
 
-`prune_context`'s tool result enumerates every excluded block with its first
-line. That result block is part of the retained context, so the manifest
-acts as an accidental, low-fidelity compaction summary (~45 characters per
-block, ~95% compression over the incident's 139 blocks). In this incident it
-preserved, verbatim, the operator's one-line instruction to flag formatting
-diagnostics in the pending repair prompt, the preceding diagnostics
-observation, and the assistant's own confirming reply ("The second repair
-prompt should explicitly require:"). The final repair prompt contains the
-requested section; the causal chain runs through the manifest, which the
-post-prune model had kept as ordinary tool output.
+The incident establishes a robustness floor: over-pruning did not destroy durable
+information. It converted tokens already in context into reread tokens and latency.
+That is survivable, but not efficient or desirable.
 
-Design implication: make this deliberate. Guarantee the first N characters
-of pruned user messages in the manifest, on the theory that user
-instructions are the highest-value loss, and consider assistant text heads
-as well. Tool-output space is where state survives context management; the
-compaction transition preamble in compact-smart is the same pattern.
+## What the incident shows
 
-### Finding 2: the degeneration has three layers
+### The prune result acted as retained memory
 
-1. A missed boundary. The session's prior prune ran at 13:22Z (81 blocks,
-   leaving 11). No prune followed for five hours across at least two work
-   boundaries (the Laguna evaluation line closing around 14:32Z, the Muse
-   Glimmer candidate work starting around 15:08Z). The Laguna close was a
-   trickle of small commits rather than a dramatic close, and the
-   wait-heavy Glimmer round interleaved a third work package (evaluator
-   infrastructure), blurring the boundaries the model normally prunes at.
-   The model's observed norm elsewhere — initiative prunes at work-package
-   closes, including at least one at ~25% capacity — did not engage.
-2. A pressure stack. At the decision point the model simultaneously held:
-   82.2% capacity, the hygiene footer's explicit demand, an operator
-   "finish this" imperative, and a multi-step final task. The radical reset
-   guarantees no further curation interruptions during the final stretch.
-   That is risk minimization, not curation: it optimized for "no more
-   context management needed" instead of keeping the working set.
-3. An asymmetric feedback landscape. The harness punishes under-pruning
-   loudly (capacity pressure, hygiene nudges, forced compaction) and
-   over-pruning not at all — the re-read cost is invisible to the model,
-   and re-reading feels like diligence. A model optimizing the signals it
-   can see will, under pressure, converge on over-pruning. The incident is
-   what that incentive landscape selects for; it is a property of the
-   design, not a quirk of the model.
+A `prune_context` result lists every excluded block and its first line. Because that
+tool result remains in context, it became an accidental, low-fidelity summary:
+approximately 45 characters per block, or roughly 95% compression across the 139
+blocks in this incident.
 
-Design implication: surface over-pruning cost. A post-prune accounting
-block (what was excluded, and what was re-read within the following turns)
-would close the feedback loop and let models learn the working-set boundary
-empirically instead of oscillating between hoarding and amputation.
+The manifest preserved the operator instruction to flag formatter diagnostics in
+the pending repair prompt, the preceding diagnostics observation, and the model's
+confirmation (“The second repair prompt should explicitly require:”). The final
+repair prompt included the requested section. The retained prune manifest therefore
+carried information that would otherwise have been removed.
 
-### Verdict
+**Design implication:** make this retention intentional. Guarantee the first *N*
+characters of excluded user messages in the manifest, because user instructions are
+especially costly to lose. Assistant-text heads may also be useful. Tool-output
+space is a practical place to preserve small but important state; compact-smart's
+compaction-transition preamble uses the same pattern.
 
-The model otherwise handles autonomous curation well across sessions,
-including initiative prunes at work-package closes and at low capacity. The
-concept works; this incident is the failure tail, and it is informative
-precisely because the worst case was survivable and its causes are
-addressable in the harness rather than in the model.
+### Three conditions produced the over-prune
+
+1. **A missed natural boundary.** The previous prune was at 13:22Z, removing 81
+   blocks and leaving 11. No further prune followed for five hours despite at
+   least two work-package boundaries: closing the Laguna evaluation around
+   14:32Z and starting Muse Glimmer work around 15:08Z. The Laguna close was a
+   trickle of small commits, and the wait-heavy Glimmer round interleaved a third
+   evaluator-infrastructure package. These blurred the boundaries at which this
+   model otherwise tends to curate, including at approximately 25% capacity.
+2. **Stacked pressure.** At the decision point, the model faced 82.2% use, an
+   explicit hygiene footer, the operator's imperative to finish, and a multi-step
+   final task. Removing nearly everything guaranteed that it would not have to
+   manage context again before finishing. That is risk minimization, not
+   working-set curation.
+3. **Asymmetric feedback.** The harness makes under-pruning visible through
+   pressure, warnings, and forced compaction. It provided no immediate signal for
+   over-pruning, while rereading appeared to the model as diligence. A model that
+   optimizes only visible signals can converge on excessive removal.
+
+**Design implication:** surface the cost of over-pruning. Post-prune accounting
+should report what was excluded and whether related material was reread in the
+following turns. This closes the feedback loop and lets a model learn its active
+working-set boundary rather than oscillating between hoarding and amputation.
+
+## Provisional conclusion
+
+The incident is evidence of a failure mode, not evidence against the whole
+approach. The same model has otherwise curated autonomously at work-package closes
+and at low capacity. The important result is narrower: the worst observed
+selection was recoverable, and its proximate causes suggest harness changes that
+can be tested directly.

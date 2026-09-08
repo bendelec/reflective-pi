@@ -31,6 +31,7 @@ For the JSONL file format and SessionManager API, see [Session Format](session-f
 | `/fork` | Create a new session from a previous user message |
 | `/clone` | Duplicate the current active branch into a new session |
 | `/compact [prompt]` | Summarize older context; see [Compaction](compaction.md) |
+| `/prune` | Review, exclude, or restore context blocks; see [Reflective context management](reflective-context.md) |
 | `/export [file]` | Export session to HTML |
 | `/share` | Upload as private GitHub gist with shareable HTML link |
 

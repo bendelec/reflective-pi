@@ -46,6 +46,7 @@ I regularly publish my own `pi-mono` work sessions here:
 - [Sessions](#sessions)
   - [Branching](#branching)
   - [Compaction](#compaction)
+  - [Reflective Context Management](#reflective-context-management)
 - [Settings](#settings)
 - [Context Files](#context-files)
 - [Customization](#customization)
@@ -191,6 +192,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/fork` | Create a new session from a previous user message |
 | `/clone` | Duplicate the current active branch into a new session |
 | `/compact [prompt]` | Manually compact context, optional custom instructions |
+| [`/prune`](docs/reflective-context.md#prune-user-review-and-recovery) | Review, exclude, or restore context blocks |
 | `/copy` | Copy last assistant message to clipboard |
 | `/export [file]` | Export session to HTML or JSONL file |
 | `/import <file>` | Import and resume a session from a JSONL file |
@@ -279,6 +281,14 @@ Long sessions can exhaust context windows. Compaction summarizes older messages 
 **Automatic:** Enabled by default. Triggers on context overflow (recovers and retries) or when approaching the limit (proactive). Configure via `/settings` or `settings.json`.
 
 Compaction is lossy. The full history remains in the JSONL file; use `/tree` to revisit. Customize compaction behavior via [extensions](#extensions). See [docs/compaction.md](docs/compaction.md) for internals.
+
+### Reflective Context Management
+
+rxpi also lets the model curate its own context before compaction is necessary.
+`[context-status]` messages report capacity, while the model can list, exclude, or
+summarize atomic context blocks. Use `/prune` to review or restore those changes.
+Pruning changes only the context sent to the model; it does not delete session
+history. See [Reflective context management](docs/reflective-context.md).
 
 ---
 

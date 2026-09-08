@@ -48,6 +48,7 @@ For the full first-run flow, see [Quickstart](quickstart.md).
 - [Keybindings](keybindings.md) - default shortcuts and custom keybindings.
 - [Sessions](sessions.md) - session management, branching, and tree navigation.
 - [Compaction](compaction.md) - context compaction and branch summarization.
+- [Reflective context management](reflective-context.md) - model-led context curation and `/prune`.
 
 ## Customization
 

@@ -1,116 +1,104 @@
-# Fork Roadmap — reflective-pi (`rxpi`)
+# Reflective-pi roadmap
 
-Living summary of this fork's state: what's done, what's pending, and where
-we're headed. Update as work lands.
+This is the implementation status and follow-up roadmap for the reflective-context
+proof of concept. Evaluation evidence and model grades live in
+[the evaluation report](packages/evals/reflective-context-results.md).
 
 ## Identity
 
-- Fork of `earendil-works/pi-mono`. Binary renamed `pi` → `rxpi`.
-- npm package name unchanged (`@earendil-works/pi-coding-agent`).
-- `APP_NAME` stays `"pi"` (drives `PI_*` env vars and the shared `.pi/` dir);
-  `BINARY_NAME` is `"rxpi"` (display/process title). See
-  `packages/coding-agent/src/config.ts`.
+- This is a fork of `earendil-works/pi-mono` whose binary is named `rxpi`.
+- Source metadata retains the inherited npm package name
+  `@earendil-works/pi-coding-agent`, but rxpi is **not published to npm**. The
+  fork does not control that npm identity and is distributed through GitHub
+  releases.
+- `APP_NAME` remains `pi`, preserving `PI_*` environment variables and the shared
+  `.pi/` directory. `BINARY_NAME` is `rxpi` and controls user-facing display and
+  process title.
 
-## Completed
+## Implemented
 
-- **Context-status messages** — auto-injected context-window usage notes between
-  turns (persisted, rendered, sent to the model). Commit `b4c857f50`.
-- **Binary rename** `pi` → `rxpi` (same commit).
-- **Prune MVP (data structure + `buildContextEntries`)** — `PruneEntry` +
-  `PruneState` enum, resolved map, `appendPruneChange`, and the
-  `buildContextEntries`/`buildSessionContext` filter. Shipped.
-- **`prune_context` tool** — TUI tree view + agentic self-curation tool to
-  add/remove prune markers. Context-status message now uses updated context
-  after pruning (fixed agent-loop to pass updated context to
-  `getContextStatusMessages`).
-- **Context snapshot refresh** — `prepareNextTurnWithContext` now refreshes
-  `context.messages` from `agent.state.messages` after each tool call, ensuring
-  pruned entries are excluded from the next server request.
-- **`createBranchedSession` prune filtering** — fork/clone filters and recreates
-  prune entries like labels, including resolved global state from sibling
-  branches.
-- **Agentic curation tools, one verb each** — `list_context` (read-only
-  listing), `prune_context` (strict mutation, fails loudly on missing ids),
-  `summarize_context` (block summarization, optional secondary model via
-  `reflectiveContext.summarizationModel`). Commits `58a6f47a1`, `2a673a649`.
-- **Proactive context hygiene reinforcement** — strengthened system prompt
-  treating context hygiene as a quality requirement, plus the mandatory
-  fallback instruction at the hygiene threshold. Commit `e4076d0dc`.
-- **Derived hygiene threshold** — the `[context-status]` hygiene tier tracks
-  the automatic-compaction line (five points below, clamped to [50%, 80%])
-  instead of a fixed 80%, so hygiene nudges always precede compaction.
-  Commit `367978486`.
-- **Bun fetch HTTP timeout fix** — the configured provider timeout is now
-  actually applied under Bun. Commit `855638b23`.
+### Model-led context curation
 
-## Audit backlog (resolved locally)
+- **Context-status messages** report context use between eligible turns. The
+  derived hygiene threshold tracks automatic compaction: five percentage points
+  below its line, clamped to 50–80%.
+- **One-action curation tools** separate read-only `list_context` from mutating
+  `prune_context` and `summarize_context`. A missing mutation payload fails
+  explicitly rather than looking like a successful no-op.
+- **Proactive-hygiene guidance** instructs the model to curate for future value at
+  work-package boundaries, not only under capacity pressure.
+- **Block summaries** are implemented. `summarize_context` can use the active
+  model or an optional `reflectiveContext.summarizationModel`.
+- **Post-prune accounting** reports whether files represented in excluded blocks
+  are reread during the following 15 turns.
 
-Audit findings retained for release verification. Binary release CI remains the
-integration check for item 1.
+### Durable and user-controlled state
 
-1. ~~**P1: Align release artifact names with `rxpi`.** `scripts/build-binaries.sh`
-   ~~emits `rxpi-*` archives, while `.github/workflows/build-binaries.yml` still
-   ~~validates and uploads `pi-*`; release CI currently fails at its asset
-   checks.~~ **Fixed locally; release CI remains the integration check.**
-2. ~~**P1: Never send pruned content to compaction.** `prepareCompaction()` uses
-   ~~the prune map for `tokensBefore`, but builds `messagesToSummarize` and
-   ~~`turnPrefixMessages` from unfiltered entries. An excluded message is therefore
-   ~~sent to the summarization model. Update cut-point/token logic and summary
-   ~~inputs consistently; add a regression test.~~ **Fixed with a regression
-   test.**
-3. ~~**P1: Preserve global prune state when forking a sibling branch.**
-   ~~`createBranchedSession()` reconstructs markers only when their original
-   ~~`prune` entry is on the selected path. A marker created on another branch is
-   ~~absent from the clone, restoring the excluded target. Recreate resolved prune
-   ~~states for every target retained in the cloned path; add a sibling-branch
-   ~~regression test.~~ **Fixed with a sibling-branch regression test.**
-4. ~~**P2: Recognize `rxpi update rxpi` as self-update.** The help text documents
-   ~~it, but the parser accepts only `self` and `pi`; `rxpi` is treated as an
-   ~~extension source. Add parser coverage.~~ **Fixed with parser coverage.**
-5. ~~**P2: Count `contextStatus` messages during compaction estimation.** They are
-   ~~persisted and sent to the model, but `estimateTokens()` returns zero for them,
-   ~~underestimating context usage and delaying compaction.~~ **Fixed with token
-   estimation and cut-point regression tests.**
-6. ~~**P2: Repair resume-command test expectations.**
-   ~~`test/format-resume-command.test.ts` still expects `APP_NAME` (`pi`) instead
-   ~~of the user-facing `BINARY_NAME` (`rxpi`); four assertions fail.~~ **Fixed.**
-7. ~~**P2: Update prune documentation.** `docs/prune.md` says the selector and
-   ~~agentic tool are planned, and `docs/context-building.md` omits `prune` from
-   ~~`SessionEntry` types.~~ **Fixed.**
-8. ~~**P2: Rename the transcript-analysis subagent command.**
-   ~~`scripts/session-transcripts.ts --analyze` hardcodes `spawn("pi", ...)`, so
-   ~~it fails for an `rxpi`-only installation.~~ **Fixed.**
+- **Append-only markers** implement `included`, `excluded`, and `summarized`
+  curation states without deleting session history.
+- **Atomic blocks** keep a tool call and its results together.
+- **`/prune`** lets users inspect, exclude, and restore atomic blocks. It can show
+  and restore summaries, but cannot yet request one.
+- **Context refresh after a curation turn** ensures that the next request and the
+  compaction check use the pruned context rather than a stale pre-prune estimate.
+- **Fork and clone handling** preserves resolved global curation state for retained
+  entries, including state inherited from sibling branches.
 
-## Future work
+### Supporting fixes
 
-- **Per-group token accounting** — attribute exact token counts to prune groups
-  from the server-reported context delta per assistant response, not content
-  heuristics (chars/4). Enables smarter prune decisions (group token cost shown
-  in the prune UI) and accurate compaction thresholds. Needs care around cache
-  accounting, compaction baseline resets, and tokenizer/model-family drift.
-  harness-v2's usage ledger (usage rows keyed to entries) already models this,
-  so it likely lands naturally on the harness-v2 migration.
-- **"summarized" prune state** — per-group mini-compaction: a cheap model
-  summarizes a group, a summary card replaces the messages in context. The
-  `PruneState` enum already anticipates this.
-- **Secondary summarization model config** — a smaller/faster/cheaper model for
-  summarization, reused by both the "summarized" state and legacy compaction.
-- **harness-v2 migration** — switch the session layer to `AgentHarness` lanes
-  (`packages/agent/src/harness/`, spec in `packages/agent/docs/harness.md`).
-  Once on lanes, make prune markers branch-scoped by adding a `branchId`.
+- Compaction does not send excluded entries to its summary model.
+- Context-status messages count toward compaction estimation.
+- The `rxpi` binary name is used consistently by self-update, transcript analysis,
+  release artifacts, and related tests.
+- Bun applies the configured provider HTTP timeout.
 
-## Design decisions & limitations
+## Follow-up work
 
-- **Prune markers are append-only entries + a resolved map** (the label pattern),
-  not mutable fields on message entries. Keeps crash-safe append-only persistence
-  and makes the future "summarized" state additive.
-- **`PruneState` is an enum, not a bool** — so "summarized" is a new variant, not
-  a type migration.
-- **Prune is GLOBAL (not branch-scoped) as the MVP** — a temporary limitation,
-  documented in `PruneState` and `packages/coding-agent/docs/context-building.md`.
-  Branch-scoping arrives with the harness-v2 lane migration.
+### Product and implementation
 
-## Reference
+1. **Per-block token accounting.** Attribute server-reported context use to blocks
+   instead of estimating from characters. Surface that information in
+   `list_context` and `/prune` so models and users can weigh relevance against
+   actual recovered capacity. Cache accounting, compaction baseline resets, and
+   tokenizer differences require care. Harness-v2's usage ledger already models
+   the relevant data.
+2. **Manual summary requests in `/prune`.** The selector should be able to request
+   a summary, not only display and restore agent-created ones.
+3. **Branch-scoped curation.** Curation markers are session-global until the
+   harness-v2 lane migration can attach an explicit branch identity.
 
-- Context building (tree → `buildSessionContext` → server): `packages/coding-agent/docs/context-building.md`.
-- harness-v2 spec: `packages/agent/docs/harness.md`.
+### Evaluation-led design questions
+
+The current results motivate, but do not yet commit the project to, further work on:
+
+- status messages timed to work-package boundaries rather than only capacity
+  thresholds;
+- post-compaction contexts made of topical, selectable summaries instead of a
+  single monolithic project-history summary;
+- more salient placement and wording for curation feedback; and
+- bash-aware re-acquisition accounting and accounting for summarized blocks.
+
+These are hypotheses to evaluate across further sessions, not settled design
+requirements.
+
+## Current limitations and decisions
+
+- Curation markers are append-only and latest-wins, following the durable label
+  pattern. This keeps persistence crash-safe and makes restoration additive.
+- `PruneState` is a three-state value rather than a Boolean so exclusion and
+  summary replacement share one reversible mechanism.
+- Curation is **session-global** in the MVP. Navigating to another branch does not
+  make prior exclusions branch-local.
+- Per-turn context-status insertion is intentionally out of scope. Threshold-based
+  messages provide awareness without adding noise or forcing terminal responses
+  into extra turns.
+
+## References
+
+- [Reflective context management](packages/coding-agent/docs/reflective-context.md)
+  — user and agent behavior.
+- [Context construction](packages/coding-agent/docs/context-building.md) — tree,
+  projection, compaction, and curation state.
+- [Context curation internals](packages/coding-agent/docs/prune.md) — atomic
+  blocks, previews, selector, and accounting.
+- [Harness-v2 specification](packages/agent/docs/harness.md).

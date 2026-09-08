@@ -1,213 +1,159 @@
-# How pi/rxpi builds the context sent to the model each turn
+# Context construction in pi and rxpi
 
-This documents the context-building path used by the **interactive CLI** (`pi` /
-`rxpi`). It is the older of two session implementations; see
-[The second tree abstraction](#the-second-tree-abstraction) for the newer one.
+This page explains how the interactive CLI turns durable session history into the
+message list sent to a model. It describes the current `SessionManager` /
+`AgentSession` path used by the interactive CLI, not the newer harness-v2 session
+layer.
 
-## Two layers
+## The two layers
 
-The system is split across two packages, and this split is the single most
-important thing to internalize:
+The context path spans two packages:
 
-1. **`packages/agent`** (npm `@earendil-works/pi-agent-core`) — a generic,
-   session-agnostic agent loop. It works purely with an in-memory
-   `AgentMessage[]` and knows nothing about files, trees, or `.jsonl`.
-   - `Agent` class (`packages/agent/src/agent.ts`) owns `state.messages`,
-     `state.systemPrompt`, `state.tools`, `state.model`, `state.thinkingLevel`.
-   - `runAgentLoop` / `runLoop` (`packages/agent/src/agent-loop.ts`) is the turn
-     loop.
-   - Types `AgentMessage`, `AgentContext`, `AgentLoopConfig` live in
-     `packages/agent/src/types.ts`.
+1. **`packages/agent`** (`@earendil-works/pi-agent-core`) provides the generic,
+   in-memory agent loop. `Agent` owns `state.messages`, the system prompt, tools,
+   model, and thinking level. `runAgentLoop` / `runLoop` drives turns.
+2. **`packages/coding-agent`** provides durable sessions, compaction, extensions,
+   and the TUI. `SessionManager` owns the tree and JSONL file; `AgentSession`
+   mirrors messages into that tree and rebuilds the in-memory transcript at
+   session boundaries.
 
-2. **`packages/coding-agent`** — the pi/rxpi app layer. Adds durability (the
-   tree + `.jsonl` file), compaction, extensions, and the TUI.
-   - `SessionManager` (`packages/coding-agent/src/core/session-manager.ts`) is
-     the tree + file.
-   - `AgentSession` (`packages/coding-agent/src/core/agent-session.ts`) glues the
-     two together: it subscribes to `Agent` events, mirrors each message into the
-     tree, and rebuilds the in-memory transcript from the tree at
-     load/compaction/navigation.
+The durable tree is the source of truth. `agent.state.messages` is a cached
+projection that grows during a live run.
 
-## The tree data structure
+## Durable session tree
 
-The node type is `SessionEntry` (in `session-manager.ts`). Every entry has:
+A `SessionEntry` has an ID, parent ID, timestamp, and type. Context-relevant
+entry types include messages, compactions, branch summaries, and custom messages.
+State and bookkeeping types include labels, model and thinking-level changes,
+session information, and curation markers (`prune`).
 
-- `type` — `message`, `thinking_level_change`, `model_change`, `compaction`,
-  `branch_summary`, `custom`, `custom_message`, `label`, `prune`, `session_info`
-- `id` — unique short hex id
-- `parentId` — id of the parent entry (`null` for the root)
-- `timestamp`
+`SessionManager` keeps:
 
-The `type: "message"` entry (`SessionMessageEntry`) wraps one `AgentMessage`
-(role + content). `AgentMessage` roles are `user` / `assistant` / `toolResult`,
-plus the coding-agent's custom roles (`bashExecution`, `custom`,
-`branchSummary`, `compactionSummary`, `contextStatus`) added via declaration
-merging in `messages.ts`.
+- `fileEntries`: all JSONL entries in append order;
+- `byId`: the entry lookup map; and
+- `leafId`: the active branch tip.
 
-`SessionManager` holds three things in memory:
+Appending creates an entry whose parent is the current leaf, persists it, and
+advances the leaf. Moving the leaf to an earlier entry and appending again creates
+a branch; history is never mutated or deleted.
 
-- `fileEntries: FileEntry[]` — every entry in append order (plus the header).
-- `byId: Map<string, SessionEntry>` — id → entry.
-- `leafId: string | null` — the current leaf, i.e. which branch we're on.
+The JSONL file begins with a `session` header. Each later line is one
+`SessionEntry`. Loading rebuilds the lookup map and sets the leaf to the final
+entry.
 
-The tree is append-only. `appendMessage()` creates an entry with
-`parentId = leafId`, pushes it, updates `byId`, advances `leafId`, and writes the
-line to the `.jsonl` file. `branch(branchFromId)` just moves `leafId` back to an
-earlier entry; the next append forks a new branch. Nothing is ever mutated or
-deleted.
+## From tree to model context
 
-## The `.jsonl` file
+`SessionManager.buildSessionContext()` returns:
 
-One JSON object per line. Line 1 is the `session` header (`SessionHeader`: type,
-version, id, timestamp, cwd, parentSession). Every later line is a
-`SessionEntry`. `loadEntriesFromFile` parses line-by-line; `_buildIndex()`
-rebuilds `byId` and sets `leafId` to the last entry.
+```ts
+{ messages, thinkingLevel, model }
+```
 
-## Building context from the tree
+It performs four distinct operations.
 
-The single entry point is `SessionManager.buildSessionContext()` →
-`{ messages, thinkingLevel, model }`. It composes four functions:
+1. **Select the active path.** `buildSessionPath()` walks from the leaf to the
+   root and reverses the result.
+2. **Recover session settings.** `getSessionContextSettings()` finds the latest
+   model and thinking-level changes on that path.
+3. **Apply compaction and curation.** `buildContextEntries()` retains the latest
+   compaction summary, its retained tail, and all newer entries. It then resolves
+   curation markers: excluded entries are omitted, and summarized originals are
+   omitted pending replacement.
+4. **Project entries to messages.** `buildSessionContext()` converts entries to
+   `AgentMessage` values and inserts a stored summary at the original position of
+   every summarized block. State markers themselves never become model messages.
 
-1. `buildSessionPath(entries, leafId, byId)` — walks `leafId` → root following
-   `parentId`, then reverses to root→leaf order. This is "which branch we're on."
-2. `getSessionContextSettings(path)` — scans the path for the latest
-   `thinking_level_change`, `model_change`, and assistant message to recover
-   `thinkingLevel` and `model`.
-3. `buildContextEntries(entries, leafId, byId, pruneStateById)` — the
-   compaction-aware truncation:
-   - Take the path.
-   - Find the **last** `compaction` entry in the path.
-   - If none, return the whole path.
-   - If found, return `[compaction, ...entries from firstKeptEntryId up to (but
-     not including) the compaction entry, ...entries after the compaction entry]`.
-   - Result: the compaction summary entry + the "retained tail" (entries kept at
-     compaction time) + everything appended since.
-   - Finally, filter out entries whose resolved prune state is `"excluded"`.
-     The compaction truncation is computed on the unfiltered path: a pruned
-     `compaction` entry still truncates history, its summary is merely omitted
-     from the result.
-4. `sessionEntryToContextMessages(entry)` — projects each entry to zero or more
-   `AgentMessage`s:
-   - `message` → `[message]`
-   - `custom_message` → `[custom message]`
-   - `branch_summary` → `[branch summary message]`
-   - `compaction` → `[compaction summary message]`
-   - `prune` (and other bookkeeping entries) → `[]` — a `prune` entry is a
-     marker on a target message, not itself a context message.
+The resulting order after compaction is:
 
-Step 3 flat-mapped through step 4 gives the final `messages: AgentMessage[]`.
+```text
+[compaction summary, retained tail, messages after compaction]
+```
 
-## Per-turn: what actually goes to the server
+Curation works on this already-compaction-truncated view. A curation marker does
+not alter the tree or JSONL history; it changes only the next context projection.
 
-Key correction to a common mental model: **the context is not rebuilt from the
-tree every turn.**
+### Curation state
 
-`buildSessionContext()` runs only at boundaries — session load/resume, after
-compaction, and on tree navigation. It produces the `AgentMessage[]` list and
-stores it in `agent.state.messages` (e.g. `sdk.ts`:
-`agent.state.messages = existingSession.messages`; and after compaction /
-`navigateTree` in `agent-session.ts`:
-`this.agent.state.messages = sessionContext.messages`).
+A latest-wins `PruneEntry` records one of three states for a target entry:
 
-During a live run, `agent.state.messages` is the live transcript that grows
-incrementally. Each turn:
-
-1. `agent.prompt()` → `runPromptMessages()` → `createContextSnapshot()` copies
-   `state.messages` (+ systemPrompt + tools) into an `AgentContext`.
-2. `runAgentLoop(prompts, context, config, ...)` appends the new prompt(s) to
-   `context.messages`.
-3. `runLoop` (agent-loop.ts) iterates: inject pending messages (steering +
-   context-status), then `streamAssistantResponse`.
-4. `streamAssistantResponse`:
-   - `config.transformContext(messages)` — optional extension hook
-     (`runner.emitContext`).
-   - `config.convertToLlm(messages)` — `AgentMessage[]` → `Message[]` (the wire
-     format). This is `convertToLlm` in `messages.ts`, wrapped with
-     image-blocking in `sdk.ts`. It passes `user` / `assistant` / `toolResult`
-     through unchanged and converts the custom roles (`bashExecution`, `custom`,
-     `branchSummary`, `compactionSummary`, `contextStatus`) into `user` messages.
-   - Build `Context { systemPrompt, messages, tools }`.
-   - `streamFunction(model, llmContext, ...)` → sends to the server.
-5. Assistant responds → tool calls execute → tool results appended to
-   `currentContext.messages` → `prepareNextTurn` (may trigger compaction) →
-   `shouldStopAfterTurn` → `getSteeringMessages` + `getContextStatusMessages`
-   collected for the next iteration.
-
-## Persistence back to the tree
-
-The `Agent` emits events (`message_start`, `message_end`, …).
-`AgentSession._handleAgentEvent` subscribes and, on `message_end`, calls
-`sessionManager.appendMessage(event.message)` (or `appendCustomMessageEntry` for
-custom messages). So every message that enters the in-memory transcript is
-mirrored into the tree and the `.jsonl` file as a new entry.
-
-## Compaction closes the loop
-
-When compaction triggers (`_checkCompaction` / `compact`):
-
-1. `appendCompaction(summary, firstKeptEntryId, tokensBefore, ...)` appends a
-   `compaction` entry to the tree.
-2. `buildSessionContext()` rebuilds the message list from the tree (now honoring
-   the new compaction entry).
-3. `agent.state.messages = sessionContext.messages` replaces the in-memory
-   transcript with the compacted version.
-
-So: the tree is the durable source of truth; `buildSessionContext()` is the
-function that turns "current branch, since last compaction" into the message
-list; and `agent.state.messages` is a cached projection of it that grows during a
-live run and is rebuilt at boundaries.
-
-## Compaction-aware truncation in detail
-
-`buildContextEntries` walks the root→leaf path and, when a `compaction` entry is
-present, keeps only:
-
-- the compaction entry itself (projects to a compaction summary message),
-- the entries from `firstKeptEntryId` up to (but not including) the compaction
-  entry — the "retained tail" that was kept at compaction time,
-- everything after the compaction entry.
-
-Everything before `firstKeptEntryId` is summarized away and omitted from context.
-The final message order is therefore:
-`[compactionSummary, ...retainedTail, ...post-compaction messages]`.
-
-## The second tree abstraction
-
-There is a **separate, newer** tree implementation in
-`packages/agent/src/harness/session/` (`Session`, `SessionTree`, `Entry`,
-`findEntriesOnBranch`, `lane` / `branch`, jsonl storage) with its own compaction
-in `packages/agent/src/harness/compaction/`.
-
-This is the storage layer of `AgentHarness` ("harness-v2"), a durable runtime
-with crash recovery, atomic transactions, lanes, registers, and a usage ledger.
-It is specified in `packages/agent/docs/harness.md`.
-
-Status: in-progress migration. It is actively being built and is used by
-`packages/evals`; there is a coding-agent adapter at
-`packages/coding-agent/src/server/create-harness.ts`, but that adapter is only
-referenced by its own test — not yet wired into the interactive CLI or a live
-server. The interactive CLI (`pi` / `rxpi`) still runs on the older
-`SessionManager` + `AgentSession` path documented above.
-
-It is easy to confuse the two, because both define a `buildSessionContext` and a
-`sessionEntryToContextMessages`:
-
-- `packages/agent/src/harness/session/context.ts` — the newer harness-v2 one.
-- `packages/coding-agent/src/core/session-manager.ts` — the one the running app
-  uses.
-
-## Key functions and where they live
-
-| Concern | File |
+| State | Context behavior |
 | --- | --- |
-| Tree node type (`SessionEntry`) | `packages/coding-agent/src/core/session-manager.ts` |
-| Tree + file (`SessionManager`) | `packages/coding-agent/src/core/session-manager.ts` |
-| Leaf→root path walk (`buildSessionPath`) | `packages/coding-agent/src/core/session-manager.ts` |
-| Compaction-aware truncation (`buildContextEntries`) | `packages/coding-agent/src/core/session-manager.ts` |
-| Entry → messages (`sessionEntryToContextMessages`) | `packages/coding-agent/src/core/session-manager.ts` |
-| Full context (`buildSessionContext`) | `packages/coding-agent/src/core/session-manager.ts` |
-| `AgentMessage[]` → wire `Message[]` (`convertToLlm`) | `packages/coding-agent/src/core/messages.ts` |
-| Turn loop (`runLoop`, `streamAssistantResponse`) | `packages/agent/src/agent-loop.ts` |
-| In-memory transcript (`Agent`, `state.messages`) | `packages/agent/src/agent.ts` |
-| Wiring + persistence (`AgentSession`) | `packages/coding-agent/src/core/agent-session.ts` |
-| Initial restore from tree | `packages/coding-agent/src/core/sdk.ts` |
+| `included` | Keep the original entry; this is the default. |
+| `excluded` | Omit the original entry. |
+| `summarized` | Omit the original entry and add its stored replacement summary. |
+
+The target is the first entry in an atomic block. For a tool exchange, the same
+state is written for the assistant tool-call entry and every following tool result,
+so the exchange is omitted or restored as a unit. See
+[Context curation internals](prune.md) for block grouping and persistence details.
+
+Compaction truncation is calculated before curation filtering. Thus an excluded
+compaction entry still establishes the historical cut, even though its summary is
+not sent to the model.
+
+## Live turns are incremental
+
+A common but incorrect mental model is that the tree is rebuilt before every
+request. It is rebuilt only at boundaries: session load or resume, compaction,
+and tree navigation.
+
+During a live run:
+
+1. `agent.prompt()` creates a context snapshot from `agent.state.messages` plus
+   the system prompt and tools.
+2. `runAgentLoop` adds user prompts and begins `runLoop`.
+3. Each iteration injects pending steering, follow-up, and context-status
+   messages, then streams an assistant response.
+4. `transformContext()` gives extensions a chance to modify messages.
+5. `convertToLlm()` converts `AgentMessage[]` to the provider wire format. Custom
+   roles such as `contextStatus`, compaction summaries, and branch summaries are
+   sent as user messages.
+6. The assistant response and tool results are appended to the live message list.
+
+A successful `prune_context` or `summarize_context` call rebuilds the relevant
+projection during that tool turn, so stale entries are absent from the next model
+request. It also resets the context-status baseline because the prior usage figure
+measured pre-curation context.
+
+## Persistence and compaction
+
+`Agent` emits events as messages start and end. `AgentSession` subscribes to these
+events and persists each completed message to `SessionManager`. Custom messages
+use the matching custom-entry path. The in-memory transcript and durable tree thus
+remain aligned across a normal live run.
+
+When compaction triggers:
+
+1. rxpi appends a `CompactionEntry` with the summary and `firstKeptEntryId`.
+2. `buildSessionContext()` projects the tree again, including the compaction
+   summary and retained tail.
+3. The resulting messages replace `agent.state.messages`.
+
+Automatic compaction therefore replaces the cached transcript with a projection of
+the durable source of truth. It does not remove older entries from the session
+file.
+
+## The newer harness-v2 session layer
+
+`packages/agent/src/harness/session/` contains a separate, newer tree and storage
+implementation used by `packages/evals`. It has its own `Session`, branches and
+lanes, JSONL storage, and compaction path. Its design is specified in
+`packages/agent/docs/harness.md`.
+
+The interactive CLI continues to use `SessionManager` and `AgentSession`. The
+harness-v2 adapter is not yet the interactive CLI's live session path. Similar
+function names exist in both systems, so confirm the package before tracing or
+changing context behavior.
+
+## Implementation map
+
+| Concern | Location |
+| --- | --- |
+| Durable tree and JSONL projection | `packages/coding-agent/src/core/session-manager.ts` |
+| Active-path traversal | `buildSessionPath()` in `session-manager.ts` |
+| Compaction and curation selection | `buildContextEntries()` in `session-manager.ts` |
+| Entry-to-message projection | `buildSessionContext()` / `sessionEntryToContextMessages()` in `session-manager.ts` |
+| Agent-to-wire conversion | `packages/coding-agent/src/core/messages.ts` (`convertToLlm`) |
+| Turn loop | `packages/agent/src/agent-loop.ts` |
+| Live transcript | `packages/agent/src/agent.ts` |
+| Persistence and context tools | `packages/coding-agent/src/core/agent-session.ts` |

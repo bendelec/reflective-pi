@@ -1,3 +1,81 @@
+# rxpi — reflective-pi
+
+**rxpi** is a focused fork of the Pi agent harness project, including our self
+extensible coding agent. It is distributed through GitHub releases, not npm; the
+inherited `@earendil-works/*` package names in this repository do not identify
+rxpi releases.
+
+## Reflective context management
+
+`rxpi` is a proof of concept for **reflective context management**: the model
+should maintain its own context as a useful working set rather than wait for the
+harness to summarize it when capacity runs low.
+
+The proof of concept tests two related ideas. First, stale material can dilute a
+model's attention even before the window is full. Models often degrade as context
+fills past a model-specific point, so a focused working set may improve output
+quality in its own right. Second, traditional compaction is reactive and
+backward-looking. It condenses what has already happened, but cannot select
+material according to the model's next task. Long-running agents are well placed to
+do better: when following a plan, they know what they will do next and can identify
+completed investigation, superseded output, and other material that no longer
+supports that work.
+
+### Mechanism
+
+The model is instructed to treat context hygiene as a quality concern, not only a
+capacity concern. At a work-package boundary, after an investigation or failure,
+or before changing topics, it should retain material useful for the next steps and
+remove the rest.
+
+rxpi provides three mechanisms:
+
+- Threshold-triggered `[context-status]` messages report context-window use and
+  provide a mandatory fallback instruction under high pressure.
+- `list_context`, `prune_context`, and `summarize_context` let the model inspect
+  blocks, exclude blocks with no remaining value, or replace valuable blocks with
+  concise summaries.
+- `/prune` gives the user a review and recovery interface. Pruning never deletes
+  session history; excluded and summarized blocks can be restored.
+
+See [Reflective context management](packages/coding-agent/docs/reflective-context.md)
+for the feature and [Context construction](packages/coding-agent/docs/context-building.md)
+for the underlying session behavior.
+
+### Evaluation
+
+The proof of concept is being evaluated internally across models with different
+capabilities and serving configurations. The task is designed to exceed each
+model's context window many times over, although an unusually terse run can fall
+short of that target. The question is whether model-led curation preserves a better
+working set than automatic compaction.
+
+[Evaluation results](packages/evals/reflective-context-results.md) record the
+protocol, session evidence, grades, and current limitations.
+
+The strongest result so far is the
+[Qwen 3.8 Flash evaluation](packages/evals/reflective-context-results.md#qwen-38-flash--local-llamacpp-engramhalo-fork-ap-q5_k_xl--mtp).
+Before automatic compaction, the model curated context at a work-package boundary
+and maintained strong code and session quality. After compaction replaced most of
+its history with a monolithic summary, both deteriorated. The same session also
+shows the present limit: even this model initiated curation only once, then became
+largely dependent on reminders. The evidence supports further investigation, not a
+general conclusion.
+
+### Current follow-up work
+
+- Add manual summary requests to `/prune`. The model can already create summaries,
+  and the selector can display and restore them, but users cannot create one there.
+- Attribute context use to individual blocks so `list_context` and `/prune` can
+  show the actual capacity recovered by each decision.
+- Make pruning branch-scoped. It is currently session-global; this depends on the
+  planned migration to a session format with explicit branch or lane identity.
+
+> **Upstream documentation:** The material below is copied verbatim from
+> [`earendil-works/pi-mono`](https://github.com/earendil-works/pi-mono). It
+> describes upstream Pi, including its npm distribution, rather than rxpi.
+
+---
 <p align="center">
   <a href="https://pi.dev">
     <img alt="pi logo" src="https://pi.dev/logo-auto.svg" width="128">
@@ -8,65 +86,11 @@
   <a href="https://www.npmjs.com/package/@earendil-works/pi-coding-agent"><img alt="npm" src="https://img.shields.io/npm/v/@earendil-works/pi-coding-agent?style=flat-square" /></a>
 </p>
 
-# rxpi — reflective-pi
+> New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-**rxpi** is a focused fork of the Pi agent harness project, including our self extensible coding agent.
+# Pi Agent Harness
 
-## Reflective context management
-
-### Idea:
-
-This fork is intended as a proof of concept for the idea that modern models should be intelligent enough
-to be trusted with curating their own context effectively. Traditionally, compaction (summary) is 
-backward-looking, not forward-looking. It summarizes the work that was done in the past; it doesn't 
-select context based on what work is planned next and what value each piece of context has for that future work.
-
-In interactive sessions, you can often provide additional hints to the compaction prompt
-(e.g., /compact keep the research of the pathfinding architecture). But for long-running 
-agentic tasks where an agent follows its own plan and the harness causes auto-compaction when context 
-pressure reaches a certain point, there is currently little forward-looking optimization. Yet, 
-these long-running tasks actually possess the best prerequisites for proactive management: because 
-the model follows a structured plan, it knows exactly what work it will do next and precisely which 
-parts of its past context remain relevant to that future work.
-
-This PoC attempts to improve this situation by giving the agentic model itself the tools needed to curate 
-its own context. Crucially, the injected system prompt encourages the model to manage its environment 
-based on value rather than capacity or pressure first. Since a clean context usually results in significantly 
-better output quality, it is highly worthwhile to prune context blocks that no longer hold future worth, 
-even if immediate capacity pressure is minimal.
-
-We implement two mechanisms to enable this:
-
-* "context-status" messages are injected into the chat at certain points (at least once every 10% of context 
-  used, and more frequently in certain high-pressure situations) to allow the model to track the context situation.
-* Agent-facing `list_context`, `prune_context`, and `summarize_context` tools let the model inspect, exclude, and summarize stale context blocks.
-
-We also added a /prune TUI command for the user to control context (and to restore blocks the agent model 
-erroneously deleted).
-
-### Evaluation Plan
-
-The roadmap is to use this PoC internally for a few weeks across a variety of models with differing competencies. 
-This testing window will allow us to evaluate and gather data on which types of models actually benefit from the 
-concept, if any.
-
-You can find additional details on the implementation
-in [Reflective context management](packages/coding-agent/docs/reflective-context.md).
-Current observations are tracked in [Reflective context evaluation results](packages/evals/reflective-context-results.md).
-
-### Future work
-
-Adding manual summary requests to `/prune`. Blocks can now be replaced by concise summaries through the
-agent-facing `summarize_context` tool, but the selector currently supports only displaying and restoring them.
-
-Tracking context use for each message during the session and storing it with the session tree, so that the list_context
-tool can preview the correct number of tokens gained by pruning each block (better decision making input for the model)
-
-Making the pruning branch-scoped in pi's tree. Current implementation of the tree in pi doesn't have branch labels/tags
-but there seems to be some upstream work ongoing on a new session format with explicit branch labels, and my current
-plan is to wait for this to arrive. Until then, pruning is session-global, not branch scoped
-
----
+This is the home of the Pi agent harness project including our self extensible coding agent.
 
 * **[@earendil-works/pi-coding-agent](packages/coding-agent)**: Interactive coding agent CLI
 * **[@earendil-works/pi-agent-core](packages/agent)**: Agent runtime with tool calling and state management

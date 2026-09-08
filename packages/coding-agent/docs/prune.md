@@ -1,157 +1,119 @@
-# Prune — context exclusion
+# Context curation internals
 
-Reversible exclusion of specific messages from the LLM context, as a
-lighter-weight alternative to legacy compaction.
+This is the implementation reference for the context-curation feature. For the
+agent and user workflow, see [Reflective context management](reflective-context.md).
 
-## Status
+## Data model
 
-- **Data model + `buildContextEntries` filter**: implemented.
-- **Atomic grouping + preview**: implemented (`packages/coding-agent/src/core/prune.ts`).
-- **TUI `/prune` command**: implemented (`packages/coding-agent/src/modes/interactive/components/prune-selector.ts`).
-- **Agentic self-curation tools** (`list_context`, `prune_context`,
-  `summarize_context`): implemented (see [Agentic tools](#agentic-tools)).
+Curation is reversible because it is represented by append-only markers, not by
+mutating or deleting messages.
 
-## Data model (implemented)
-
-- `PruneState = "included" | "excluded"` (a `"summarized"` state is planned).
-- `PruneEntry { type: "prune", targetId, state }` — append-only, latest-wins.
-- Resolved into `pruneStateById` in `_buildIndex`, like labels.
-- `appendPruneChange(targetId, state)` appends + updates the resolved map.
-- `buildContextEntries(..., pruneStateById?)` filters `"excluded"` entries; the
-  compaction truncation is still computed on the unfiltered path (a pruned
-  compaction entry truncates history but omits its summary).
-
-Prune is currently **GLOBAL** (not branch-scoped). Branch-scoping arrives with
-the harness-v2 lane migration (see `ROADMAP.md`).
-
-## Atomic grouping
-
-The mandatory atomic unit is the **tool exchange**: an `assistant` message whose
-content contains at least one `toolCall`, plus every immediately-following
-`toolResult` message answering those calls. It is atomic in both directions —
-pruning the assistant leaves a dangling `toolCallId`, pruning the results leaves
-unanswered tool calls.
-
-Everything else is a block of one.
-
-Algorithm (walk the branch linearly):
-
-1. `user` → block `[user]`.
-2. `assistant` with tool calls → block `[assistant, ...toolResult]`, absorbing
-   every following `toolResult` until the next non-`toolResult` message.
-3. `assistant` without tool calls → block `[assistant]`.
-4. `toolResult` standalone → never happens (absorbed into step 2).
-
-Positional grouping is sufficient: the agent loop always appends tool results
-immediately after their assistant message.
-
-Soft edge cases (note, not enforced in MVP):
-
-- First message must be user/system (Anthropic hard-errors on assistant-first).
-- Consecutive user messages (pruning a standalone assistant between two users).
-
-## TUI command
-
-A dedicated `/prune` command (not integrated into `/tree`). It opens
-`PruneSelectorComponent` (`prune-selector.ts`), a linear list of atomic blocks.
-
-- The block source is `buildContextEntriesAll()` — the compaction-truncated
-  path **ignoring** prune markers — so pruned blocks are still present and can
-  be restored.
-- Default view: **included only** (pruned blocks hidden). `Ctrl+A` toggles
-  **show all**, where pruned blocks are marked `[pruned]` and selectable to
-  restore.
-- One command, one selector, two filter states — pruning and restoring are the
-  same interaction (toggle prune state), so a second command would duplicate the
-  selector for a one-bit filter difference.
-
-Interaction is staged and committed atomically:
-
-- `Up`/`Down` move the cursor (wrapping).
-- `Space` toggles the selected block's state locally (staged); changed blocks
-  show a `*` suffix and a `[N changes]` counter in the status line.
-- `Enter` commits all staged changes as `appendPruneChange` calls and closes.
-- `Escape`/`Ctrl+C` aborts without committing.
-
-Visibility is filtered client-side from `initialPruned` (the resolved prune
-state of each block), not by rebuilding the entry list.
-
-## Agentic tools
-
-`AgentSession` registers the context tools (`agent-session.ts`,
-`_createListToolDefinition`, `_createPruneToolDefinition`,
-`_createSummarizeToolDefinition`) so the model can curate its own context. They
-are always active (appended to the default active-tool list in `_buildRuntime`).
-
-One verb per tool:
-
-- **`list_context`** — read-only, no parameters. Prints the current context
-  blocks (via `groupPruneBlocks(buildContextEntries())`) with each block's id
-  and preview, plus a read-only reminder. The id is the block's first entry id;
-  that id is what the mutating tools accept.
-- **`prune_context`** — `{"ids": ["id1", "id2"]}` marks each matched block
-  `"excluded"` via `setPruneState`. Each block is excluded atomically (tool
-  calls stay with their results). When some ids match and others do not, the
-  matched blocks are excluded and the unknown ids are reported. A bare call, an
-  empty ids array, or ids that match nothing fail with an error result pointing
-  at `list_context`. The agent tool only excludes and cannot restore; session
-  history is retained, and the user can restore blocks via `/prune`.
-- **`summarize_context`** — `{"ids": [...]}` replaces each matched block with
-  a model-generated summary (see `reflective-context.md`).
-
-After pruning, the tool clears the cached context-status percent baseline and
-forces a context-status message on the next turn so the user can verify the
-resulting shrink.
-
-## Layout
-
-```
-1. user: fix the login bug
-2. assistant: read, edit
-     read src/login.ts: "export function login(user, pass) {"
-     edit src/login.ts: "if (user == null) throw new Error('missing user')"
-3. assistant: Fixed the login bug by tightening the null check.
+```ts
+PruneState = "included" | "excluded" | "summarized"
+PruneEntry { type: "prune", targetId, state, summary? }
 ```
 
-- **Preview line** = the block's identity, one line.
-- **Indented lines** = individual messages, only for multi-message blocks (tool
-  exchanges). A size-1 block *is* its preview line.
-- **Blank line** = block separator.
+`PruneEntry` follows the label pattern: session loading resolves the latest marker
+for each target. `included` is the default and restores the original block.
+`excluded` omits it from model context. `summarized` omits it and inserts the
+replacement summary stored on the block's first entry.
 
-## Preview format
+`buildContextEntries()` applies compaction truncation on the unfiltered branch
+path, then removes excluded and summarized original entries. `buildSessionContext()`
+adds a stored summary at the original block position. A pruned compaction entry
+still defines the compaction boundary even though its summary is omitted.
 
-Preview line: `role: <identity>`.
+Prune state is currently **global to the session**, not scoped to a branch. The
+planned harness-v2 lane migration is the point at which markers can gain a
+branch identity.
 
-- `user:` + truncated text.
-- `assistant:` + truncated text (no tool calls), or the tool names for a tool
-  exchange (e.g. `assistant: read, edit`).
-- `contextStatus:` / `custom:` / `compaction:` / `branch:` + truncated content.
+## Atomic blocks
 
-Indented tool-call line: `toolName args: "first content line"`, where the
-content preview source is per-tool:
+The smallest removable unit is a context block. A normal context-contributing
+entry forms a block of one. A tool exchange is atomic:
 
-- **read** → first non-empty line of the **result** (file content).
-- **write / edit** → first non-empty line of the **args** (content being written).
-- **bash** → first non-empty line of the **result** (output).
-- **custom/unknown** → `toolName args`, no content preview.
+```text
+assistant tool-call message
+immediately following tool-result messages
+```
 
-The read/bash-take-from-result, write/edit-take-from-args split is the key: for
-read/bash the identifying content is the output, for write/edit it is the input.
+Tool results refer to tool-call IDs, so separating either side would produce an
+invalid conversation. `groupPruneBlocks()` walks the active context linearly and
+absorbs every immediately following tool result into its assistant tool-call block.
+Bookkeeping entries, including prune markers, do not form blocks because they do
+not contribute messages to the model context.
 
-The preview needs the tool call correlated with its result by `toolCallId`.
+## Agent tools
 
-## Truncation
+`AgentSession` always registers three tools:
 
-Everything is single-line, truncated to terminal width minus indent (maximum use
-of the line, no fixed short cap). Tool results are clipped aggressively — the
-prune list is a table of contents, not a reader.
+| Tool | Contract |
+| --- | --- |
+| `list_context` | No arguments; lists block IDs and previews; never changes context. |
+| `prune_context` | Requires a non-empty `ids` array; excludes matching blocks. |
+| `summarize_context` | Requires a non-empty `ids` array; summarizes each matching block independently, then replaces it. |
 
-## Deferred
+The mutating tools use a deliberately guided contract. Missing, empty, or wholly
+unknown IDs fail and point to `list_context`; partial matches succeed while
+reporting unknown IDs. This avoids the old dual-mode `prune_context` behavior in
+which a bare call looked like a successful no-op.
 
-- **Token count per block** — omitted for now. Interim stopgap: a deliberately
-  pessimistic `chars/6` estimate so pruning never overpromises freed context.
-  Long-term: server-reported context deltas (see `ROADMAP.md`).
-- **"summarized" state** — per-group mini-compaction (summary card replaces the
-  messages).
-- **Branch-scoping** — `branchId` on prune markers, after harness-v2.
-- **Collapse/expand** — always-show (truncated) is fine for the MVP.
+The agent can only remove or summarize context. `/prune` is the restoration path.
+
+## `/prune` selector
+
+The selector obtains its source from `buildContextEntriesAll()`: the
+compaction-truncated branch without curation filtering. It can therefore show
+excluded and summarized blocks as well as included ones.
+
+- The default view contains included blocks only.
+- `Ctrl+A` switches to the show-all view.
+- `Space` stages an include/exclude change.
+- `Enter` writes every staged change as an `appendPruneChange()` call.
+- `Escape` or `Ctrl+C` discards staged changes.
+
+The selector restores excluded or summarized blocks by writing `included`. It does
+not yet request new summaries.
+
+## Previews
+
+Each block has one single-line identity preview. Multi-message tool-exchange
+blocks add indented detail lines. Width determines truncation; the selector is a
+table of contents, not a reader.
+
+The preview takes the following form:
+
+```text
+user: fix the login bug
+
+assistant: read, edit
+  read src/login.ts: "export function login(user, pass) {"
+  edit src/login.ts: "if (user == null) throw new Error('missing user')"
+
+assistant: Fixed the login bug by tightening the null check.
+```
+
+For tool details, `read` and `bash` identify their result; `write` and `edit`
+identify their input. Other tools show their name only. This distinction preserves
+the most useful identity signal without displaying full tool output.
+
+## Post-prune accounting
+
+`PruneAccounting` opens a 15-turn window for each successful `prune_context`
+call. It records files read or edited in the excluded blocks, then watches later
+`read` calls for those paths. A positive result says the full window was clean. A
+negative result reports the files and approximately how much content was reread;
+it is emitted early after three files or 5,000 characters, otherwise at window
+close.
+
+A subsequent prune closes an earlier window. A clean earlier window that is cut
+short is discarded rather than treated as positive evidence. The mechanism does
+not yet observe shell-mediated reads or assess whether a replacement summary was
+sufficient.
+
+## Deferred work
+
+- Attribute reliable token use to each block and expose it in the selector and
+  agent listing.
+- Allow `/prune` to create summaries.
+- Add branch-scoped curation state with harness-v2 lanes.
