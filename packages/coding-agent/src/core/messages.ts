@@ -156,13 +156,13 @@ export function createCustomMessage(
 
 export const CONTEXT_STATUS_TAG = "[context-status]";
 export const CONTEXT_HYGIENE_CHECK_REQUIRED =
-	"CONTEXT HYGIENE CHECK REQUIRED: Before continuing substantive work, call list_context to review the current blocks, assess them against the planned next steps, and exclude every block that no longer adds value with prune_context. Do not wait for automatic compaction.";
+	"CONTEXT HYGIENE CHECK REQUIRED: Before further substantive work, call list_context. Keep or summarize decisions and other state that would be costly to reconstruct. Prune closed or replaceable material. Do not wait for automatic compaction.";
 
 /**
  * Percent at which a context-status message carries the explicit hygiene
  * instruction. Derived from the auto-compaction trigger line
  * (contextWindow - reserveTokens) so the nudge always precedes compaction
- * for any reserveTokens: five points below the line, clamped to [50, 80].
+ * for any reserveTokens: ten points below the line, clamped to [50, 80].
  * With compaction disabled there is no line to precede and the historical
  * 80% applies.
  */
@@ -173,7 +173,7 @@ export function contextHygieneThresholdPercent(
 ): number {
 	if (!compactionEnabled || contextWindow <= 0) return 80;
 	const linePercent = (1 - reserveTokens / contextWindow) * 100;
-	return Math.max(50, Math.min(80, linePercent - 5));
+	return Math.max(50, Math.min(80, linePercent - 10));
 }
 
 /** Format a context status line: `[context-status] window 128,000 · used 45,230 (35.3%)`. */

@@ -48,9 +48,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 Your context is your working set. Treat its quality as a requirement for good work, not merely as a limited resource. Stale, redundant, or no-longer-relevant context competes for attention and degrades planning, reasoning, and implementation quality even when the context window is far from full.
 
-Curate context proactively at natural work boundaries: after completing a plan milestone, finishing an investigation or refactor, resolving a failure, or before starting a new topic or work package. At those points, consider which blocks will materially help with the planned next steps or likely follow-up. Use prune_context to remove blocks that will not.
-
-Do not retain context solely because it might hypothetically be useful. Keep material needed for near-term work or likely follow-up; source files and the session history remain available to re-read when genuinely needed.
+At natural work boundaries—after completing a plan milestone, finishing an investigation or refactor, resolving a failure, or before starting a new topic or work package—curate for the work ahead. Keep decisions, requirements, external findings, and unresolved work that would be costly to reconstruct. Prune closed or replaceable material, such as stale file reads and completed tool output; source files and session history can be re-read when needed. Use summarize_context when information will matter later but no longer needs its original detail. Do not wait for capacity pressure.
 
 The harness may inject short [context-status] messages between turns (for example, [context-status] window 128,000 · used 45,230 (35.3%)) reporting current context use. Only the most recent status is valid; earlier ones are stale and superseded. Context-status messages measure capacity only. They do not decide when context should be curated. Capacity pressure is a safety signal, not the normal trigger for hygiene.
 `;

@@ -5,9 +5,11 @@ context it sends to the model. The feature is a proof of concept: instead of
 waiting for automatic compaction to summarize a full transcript, the model can
 maintain a focused working set while it still knows which work comes next.
 
-This page describes the user-visible behavior. For the session-tree projection
-that makes it work, see [Context construction](context-building.md). For the
-lower-level block and selector implementation, see [Prune implementation](prune.md).
+This page describes the user-visible behavior. For the current PoC evidence,
+design decisions, and next experiments, see [Reflective-context PoC
+findings](reflective-context-poc.md). For the session-tree projection that makes
+it work, see [Context construction](context-building.md). For the lower-level
+block and selector implementation, see [Prune implementation](prune.md).
 
 ## Goal and operating model
 
@@ -53,16 +55,17 @@ least one condition applies:
 - the completed turn increased context use by more than five percentage points; or
 - context use is at or above the **hygiene threshold**.
 
-The hygiene threshold is five percentage points below the automatic-compaction
+The hygiene threshold is ten percentage points below the automatic-compaction
 line, clamped to 50–80%. It therefore remains below the compaction line when
 `compaction.reserveTokens` changes. With the default compaction settings it is
-80%; a reserve that moves automatic compaction to 75% moves the hygiene threshold
-to 70%.
+77.2%; a reserve that moves automatic compaction to 75% moves the hygiene
+threshold to 65%.
 
 At or above the hygiene threshold, the status message instructs the model to list
-context blocks and exclude every block that no longer adds value before continuing
-substantive work. This is a last-resort fallback for models that have not curated
-at natural boundaries.
+context blocks before continuing substantive work. It should retain or summarize
+decisions and other hard-to-reconstruct state, then prune closed or replaceable
+material. This is a last-resort fallback for models that have not curated at
+natural boundaries.
 
 A status message is not emitted after a turn with no tool work; doing so would
 force an otherwise terminal response into another turn. It is also skipped

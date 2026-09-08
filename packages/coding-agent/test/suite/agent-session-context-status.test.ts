@@ -61,18 +61,33 @@ describe("AgentSession context status", () => {
 	});
 
 	it("derives the hygiene threshold below the compaction line for any reserve", () => {
-		// Raised 32k reserve on a 131k window: compaction line at 75%, nudge at 70%.
-		// This is the configuration whose hard-coded 80% predecessor was preempted
-		// and then raced the compaction by 3 ms in the hosted Laguna evaluation.
-		expect(contextHygieneThresholdPercent(131_072, 32_768, true)).toBe(70);
-		// Default 16k reserve on a 128k window: line at 87.2%, line-5 = 82.2 caps
-		// back at 80 — the historical threshold is preserved exactly, and the cap
-		// never breaks ordering (it only engages when the line is at least 85%).
-		expect(contextHygieneThresholdPercent(128_000, 16_384, true)).toBe(80);
+		// Evaluation configuration: 24k reserve on a 128k window gives an 80.8%
+		// compaction line and a 70.8% hygiene threshold.
+		expect(contextHygieneThresholdPercent(128_000, 24_576, true)).toBeCloseTo(70.8);
+		// Default 16k reserve on a 128k window: line at 87.2%, nudge at 77.2%.
+		expect(contextHygieneThresholdPercent(128_000, 16_384, true)).toBeCloseTo(77.2);
 		// Compaction disabled: no line to precede, historical threshold applies.
 		expect(contextHygieneThresholdPercent(128_000, 16_384, false)).toBe(80);
 		// Degenerate reserve not smaller than the window clamps at 50.
 		expect(contextHygieneThresholdPercent(1000, 16_384, true)).toBe(50);
+	});
+
+	it("uses the derived threshold when inserting a resume or tree status", async () => {
+		const harness = track(
+			await createHarness({
+				models: [{ id: "test-model", contextWindow: 1000 }],
+				settings: { compaction: { enabled: true, reserveTokens: 300 } },
+			}),
+		);
+		harness.session.getContextUsage = () => ({ tokens: 600, contextWindow: 1000, percent: 60 });
+
+		(harness.session as unknown as { _insertContextStatusNow(): void })._insertContextStatusNow();
+
+		const status = harness.session.messages.at(-1);
+		expect(status?.role).toBe("contextStatus");
+		if (status?.role === "contextStatus") {
+			expect(status.content).toContain(CONTEXT_HYGIENE_CHECK_REQUIRED);
+		}
 	});
 
 	it("does not inject a context-status message on a terminal (no-tool) turn", async () => {

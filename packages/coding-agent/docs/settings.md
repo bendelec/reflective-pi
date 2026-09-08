@@ -120,8 +120,8 @@ Set `PI_SKIP_VERSION_CHECK=1` to disable the Pi version update check. Use `--off
 | `compaction.keepRecentTokens` | number | `20000` | Recent tokens to keep (not summarized) |
 
 Raising `reserveTokens` also lowers the `[context-status]` hygiene threshold:
-it tracks five percentage points below the compaction line, clamped to
-[50%, 80%], so hygiene nudges always precede automatic compaction (see
+it tracks ten percentage points below the compaction line, clamped to
+[50%, 80%], so hygiene nudges have room to precede automatic compaction (see
 [reflective-context.md](reflective-context.md)).
 
 ### Reflective Context

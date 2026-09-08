@@ -734,12 +734,14 @@ export class AgentSession {
 			return;
 		}
 
+		const compaction = this.settingsManager.getCompactionSettings();
 		const message = createContextStatusMessage(
 			usage.contextWindow,
 			Math.round(usage.tokens),
 			usage.percent,
 			Date.now(),
-			usage.percent >= 80,
+			usage.percent >=
+				contextHygieneThresholdPercent(usage.contextWindow, compaction.reserveTokens, compaction.enabled),
 		);
 		this._contextStatusLastPercent = usage.percent;
 		this.agent.state.messages.push(message);
@@ -3154,7 +3156,7 @@ export class AgentSession {
 				'Replace selected context blocks with concise summaries. First call list_context with no parameters to list the current blocks and ids. Then call summarize_context with {"ids": ["id1", "id2"]}. Each selected atomic block is summarized independently and can be restored with /prune.',
 			promptSnippet: "Replace selected context blocks with concise summaries.",
 			promptGuidelines: [
-				"First call list_context to inspect the current blocks, then use summarize_context for blocks whose essential information may still help later but whose full text is no longer worth retaining.",
+				"First call list_context to inspect the current blocks, then use summarize_context for hard-to-reconstruct conclusions needed later when their original detail is no longer needed.",
 				"Use prune_context instead when a block has no likely future value. Summarized blocks can be restored by the user with /prune.",
 			],
 			parameters: schema,
