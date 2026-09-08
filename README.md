@@ -50,8 +50,11 @@ model's context window many times over, although an unusually terse run can fall
 short of that target. The question is whether model-led curation preserves a better
 working set than automatic compaction.
 
-[Evaluation results](packages/evals/reflective-context-results.md) record the
-protocol, session evidence, grades, and current limitations.
+[PoC findings and next experiments](packages/coding-agent/docs/reflective-context-poc.md)
+summarize the current cross-session evidence, decisions, and open questions.
+[Evaluation results](packages/evals/reflective-context-results.md) retain the
+candidate-by-candidate protocol, session evidence, and grades behind those
+findings.
 
 The strongest result so far is the
 [Qwen 3.8 Flash evaluation](packages/evals/reflective-context-results.md#qwen-38-flash--local-llamacpp-engramhalo-fork-ap-q5_k_xl--mtp).

@@ -30,10 +30,9 @@ substantially less than ten windows.
 
 ## Current findings
 
-The Qwen 3.8 Flash session is the most informative result so far. It is the first
-run with live post-prune accounting and the first to use `summarize_context`. It
-also provides the clearest comparison of the two context-management strategies in
-one task:
+The Qwen 3.8 Flash session is the most informative result so far. It is the
+first run to use `summarize_context` and provides the clearest comparison of the
+two context-management strategies in one task:
 
 - Before automatic compaction, model-led curation preserved a lean, useful working
   set while both session execution and C++ work remained strong.
@@ -287,8 +286,9 @@ unless configured. Throughput was approximately 15–20 tokens/second with
 acceptance-discounted MTP.
 
 This was the first run on a live-instrumented harness. A surgical session reset
-introduced post-prune accounting during the session, so only later prune windows
-have live verdicts.
+introduced the then-experimental post-prune accounting mechanism, so only later
+prune windows contained its messages. The mechanism was subsequently removed;
+reacquisition of a file from disk is not, by itself, evidence of poor curation.
 
 #### Initial round: strong implementation and deliberate curation
 
@@ -319,8 +319,9 @@ The post-series audit recorded additional re-acquisition: requirements documents
 from the first prune were reread nine minutes after exclusion, and documents plus
 `simulation.cpp` from the 48-block prune were reacquired for remaining
 documentation work. One further window contained only a 95-character exception.
-The current ledger does not observe shell-mediated reads such as `sed` and `grep`;
-bash-aware accounting is queued after the series.
+These observations describe the model's working-set transitions; they are not used
+as a direct quality verdict. The removed native-only tracker also did not observe
+shell-mediated reads such as `sed` and `grep`.
 
 A separate mechanical weakness affected several selections. Across five prune
 calls, approximately 30 submitted IDs were unknown. Every one was a corrupted copy
@@ -391,14 +392,15 @@ This session provides two linked signals.
    reminded, not sustained initiative.
 
 The implications have two layers. On the harness side, experiments should test
-boundary-timed nudges, more salient accounting verdicts, and a post-compaction
-context made of topical, selectable summaries rather than one monolith. On the
-model side, proactive context hygiene may require post-training; it does not yet
-appear to be behavior reliably sampled by models trained around traditional
-compaction. Both self-initiated events observed in the evaluation came from Qwen3.8
-models—Qwen3.8 27B at 70.9% before the warning threshold and Qwen 3.8 Flash at 47%
-before pressure—which is notable but not enough evidence to establish a
-family-level trait.
+better guidance, a concise post-prune acknowledgement oriented toward preserving
+hard-to-reconstruct state, and a post-compaction context made of topical,
+selectable summaries rather than one monolith. On the model side, proactive
+context hygiene may require post-training; it does not yet appear to be behavior
+reliably sampled by models trained around traditional compaction. Both
+self-initiated events observed in the evaluation came from Qwen3.8 models—Qwen3.8
+27B at 70.9% before the warning threshold and Qwen 3.8 Flash at 47% before
+pressure—which is notable but not enough evidence to establish a family-level
+trait.
 
 The session used eight delegated subagent sessions: two parallel pairs, plus
 review and documentation checks in the repair rounds. One parallel pair lost two

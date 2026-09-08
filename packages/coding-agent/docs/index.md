@@ -49,6 +49,7 @@ For the full first-run flow, see [Quickstart](quickstart.md).
 - [Sessions](sessions.md) - session management, branching, and tree navigation.
 - [Compaction](compaction.md) - context compaction and branch summarization.
 - [Reflective context management](reflective-context.md) - model-led context curation and `/prune`.
+- [Reflective-context PoC findings](reflective-context-poc.md) - current evidence, design decisions, and next experiments.
 
 ## Customization
 
