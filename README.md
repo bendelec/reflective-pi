@@ -1,54 +1,130 @@
 # rxpi — reflective-pi
 
-**rxpi** is a focused fork of the Pi agent harness project, including our self
-extensible coding agent. It is distributed through GitHub releases, not npm; the
-inherited `@earendil-works/*` package names in this repository do not identify
-rxpi releases.
+**rxpi** is a proof of concept implementation for autonomous context curation 
+implemented within a fork of the well known Pi agent harness project by Mario
+Zechner / Earendil Works.
 
 ## Reflective context management
 
-`rxpi` is a proof of concept for **reflective context management**: the model
-should maintain its own context as a useful working set rather than wait for the
-harness to summarize it when capacity runs low.
+### The observation
 
-The proof of concept tests two related ideas. First, stale material can dilute a
-model's attention even before the window is full. Models often degrade as context
-fills past a model-specific point, so a focused working set may improve output
-quality in its own right. Second, traditional compaction is reactive and
-backward-looking. It condenses what has already happened, but cannot select
-material according to the model's next task. Long-running agents are well placed to
-do better: when following a plan, they know what they will do next and can identify
-completed investigation, superseded output, and other material that no longer
-supports that work.
+Having done post-mortem analysis on dozens of long-running software development 
+sessions with less than ideal outcome, two patterns clearly emerged:
 
-### Mechanism
+1. Output quality tended to degrade as the context window filled up. Stale
+information kept within the context would result in attention dilution and the
+resulting degradation of output was strong enough to be subjectively observable
+across a sufficiently large set of example sessions.
 
-The model is instructed to treat context hygiene as a quality concern, not only a
-capacity concern. At a work-package boundary, after an investigation or failure,
-or before changing topics, it should retain material useful for the next steps and
-remove the rest.
+2. Harness induced (automatically triggered) compactions could often be identified
+as inflection points in the sessions. Sessions would progress well towards the
+goal until a specific compaction event, then would start drifting in a wrong direction.
+Taking a closer look at the generated summary would sometimes tell the story: The
+summary would give a lot of room to local one-off decisions without future impact
+but then cut away important findings and strategic decisions in other places.
 
-rxpi provides three mechanisms:
+In interactive sessions, the user can control when to compact, and often steer the
+compaction by adjusting the compaction prompt. In long-running unobserved sessions
+where the model follows a plan or specification, this is not possible. The
+harness will enforce compaction at a pre-defined tigger point (e.g. 60% context 
+window), and the agent will get whatever summary the generic compaction prompt
+happens to generate.
 
-- Threshold-triggered `[context-status]` messages report context-window use and
-  provide a mandatory fallback instruction under high pressure.
-- `list_context`, `prune_context`, and `summarize_context` let the model inspect
-  blocks, exclude blocks with no remaining value, or replace valuable blocks with
-  concise summaries.
-- `/prune` gives the user a review and recovery interface. Pruning never deletes
-  session history; excluded and summarized blocks can be restored.
+### The idea
+
+There are, of course, various approaches to fix these issues. In a well set up project, 
+hierarchical AGENT.md, project structure, specs, architecture and a working plan 
+provide a clear enough picture to an agent to reorient itself at any given time. Many
+of the observed failures were just as much proof of insufficient project setup
+than of any inherent problem with compaction.
+
+Nevertheless, the way compaction works in most harnesses at the moment is in 
+principle backward oriented: compaction summarizes *the work done so far*. 
+Long-running agents should be well placed to do better. When they follow a plan,
+they know what they will do next. They can select material according to its value to 
+the tasks coming up next, and filter out completed investigations, superseded 
+output and other material that no longer supports that work.
+
+If given apropriate tools, recent models should have the meta-cognitive ability
+to keep their own context focused and foward looking, actively curating it as
+a function of quality and value, not of capacity.
+ 
+### The mechanism
+
+The harness provides three core tools to the model:
+- `list_context` provides the model with a list of message groups currently in 
+the context
+- `prune_context` lets the model exclude blocks with no remaining value from 
+the context completely
+- `summarize_context` lets the model replace valuable blocks with concise summaries
+
+An injection into the system prompt encourages the model to curate its own context,
+mentioning the penalty of attention diluation and recommending a forward-looking,
+quality based approach to context hygiene over a capacity-pressure based approach.
+
+In addition, treshold-triggered `[context-status]` messages report context window use
+to the model and provides mandatory fallback instruction under high pressure.
+
+The TUI includes a "/prune" command for the user that allows manual pruning, but 
+also restoration of messages in case valuable material was erroneously removed.
 
 See [Reflective context management](packages/coding-agent/docs/reflective-context.md)
-for the feature and [Context construction](packages/coding-agent/docs/context-building.md)
-for the underlying session behavior.
+for more details on the reflective context curation mechanism and [Context construction](packages/coding-agent/docs/context-building.md) for the underlying session behavior.
 
 ### Evaluation
 
-The proof of concept is being evaluated internally across models with different
-capabilities and serving configurations. The task is designed to exceed each
-model's context window many times over, although an unusually terse run can fall
-short of that target. The question is whether model-led curation preserves a better
-working set than automatic compaction.
+In addition to using the rxpi PoC during my own work on a C++ based game, I attempted
+a more structural approach to evaluating if and how various models pick up
+on the concept.
+
+I designed A standard task that I intended to exceed a 128k context window several
+times over, and run that same task with several different models, each limited to the
+128k context. Once the models were finished, I analyzed if they showed initiative in
+managing their context or if they ignored it and the harness fell back on automatic
+compaction. If they used the tool, I also evaluated the model's selection of what
+context to prune and what to keep, and their reasoning process, if available.
+
+This is an inherently subjective process, but I tried to keep it as objective as possible.
+I used AI agents to help me disect and analyze the sessions effectively.
+
+### Result summary
+
+Overall, the results so far are a mixed bag. 
+
+On the plus side, all but the weakest models have proven that they are able to 
+competently use the tools provided to curate their own context, and that they are able
+to make good decisions on what context to keep and what to prune. I have also
+collected a certain amount of anecdotal evidence both during the evaluation (e.g. Qwen
+3.8 flash max session) and during work on my game project, that sessions where the model
+actively curated their own context and kept it focused did provide, on average, better 
+results and less drift than sessions that fell back on automated compaction.
+
+On the negative side, all evaluated projects showed very little initiative to pro-actively
+curate their context before capacity pressure caused increasingly urgent warning prompts
+to be injected. Many models ignored the provided tools even then, and run into 
+harness-enforced compaction unless the user intervened with clear orders to 
+interrupt work and curate context now. The models that did best overall (each 
+for their respective class) were the models of the Qwen 3.8 family. I evaluated all 
+three sizes (27b, flash next and max). Each showed initiative to curate its context 
+before capacity pressure at least once, and each showed better consistence than other
+models in a similar class. Unfortunatelly, even Qwen 3.8 models did not stick to it in
+the long run, but got distracted and eventually run into harness-induced auto-compaction 
+in longer sessions.
+
+### Next steps
+
+Several iterative attempts to improve the injected system prompt slices and the tool
+hints did, unfortunately, not prove to be sufficient to make models keep the initiative
+to curate their own context. It seems that the training of the models, which encourages
+a goal-focused approach, is sufficient to override meta-cognitive side-tasks even
+for current frontier models (e.g. gpt 5.6 terra).
+
+The next step, for me, is therefore to attempt to fine-tune a LoRA for some of the
+evaluated models in an attempt to make it pick up on curating its context at 
+reasonable inflection points (when finishing a sub-task, work package, slice, 
+bug-fix-detour, etc.). This is not something I have attempted before, so it will
+be an adventure in itself.
+
 
 [PoC findings and next experiments](packages/coding-agent/docs/reflective-context-poc.md)
 summarize the current cross-session evidence, decisions, and open questions.
@@ -56,23 +132,7 @@ summarize the current cross-session evidence, decisions, and open questions.
 candidate-by-candidate protocol, session evidence, and grades behind those
 findings.
 
-The strongest result so far is the
-[Qwen 3.8 Flash evaluation](packages/evals/reflective-context-results.md#qwen-38-flash--local-llamacpp-engramhalo-fork-ap-q5_k_xl--mtp).
-Before automatic compaction, the model curated context at a work-package boundary
-and maintained strong code and session quality. After compaction replaced most of
-its history with a monolithic summary, both deteriorated. The same session also
-shows the present limit: even this model initiated curation only once, then became
-largely dependent on reminders. The evidence supports further investigation, not a
-general conclusion.
 
-### Current follow-up work
-
-- Add manual summary requests to `/prune`. The model can already create summaries,
-  and the selector can display and restore them, but users cannot create one there.
-- Attribute context use to individual blocks so `list_context` and `/prune` can
-  show the actual capacity recovered by each decision.
-- Make pruning branch-scoped. It is currently session-global; this depends on the
-  planned migration to a session format with explicit branch or lane identity.
 
 > **Upstream documentation:** The material below is copied verbatim from
 > [`earendil-works/pi-mono`](https://github.com/earendil-works/pi-mono). It
