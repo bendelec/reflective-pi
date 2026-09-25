@@ -27,6 +27,7 @@ substantially less than ten windows.
 | Laguna S 2.1 | Local ds4 (revived); sigQ8/Q4K, guarded | 3/10 | It was the only model other than Qwen3.8 27B and Qwen 3.8 Flash to attempt curation before capacity pressure. Its block choices were correct, but it supplied a comma-separated string instead of an array and never tried again. |
 | Muse Glimmer 30B | Local Lemonade; `UD-Q8_K_XL` | 4/10 | It responded well to the hygiene nudge: six incremental prunes reduced use from 71.6% to 16%, avoiding all automatic compactions. It was never proactive, and two prunes removed active repair material. |
 | Qwen 3.8 Flash | Local llama.cpp (EngramHalo fork); `AP-Q5_K_XL` + MTP | 7/10 | It was the first model to curate at a work-package boundary well before pressure, used `summarize_context` appropriately, and selected blocks well. Its initiative then declined, and a single automatic compaction degraded both the C++ result and subsequent curation. |
+| GPT-5.6 Terra | OpenAI Codex API subscription; `gpt-5.6-terra` | 5/10 | It made proactive cleanups in the initial and final rounds and avoided compaction, but its late first-repair prune discarded the initial task and authoritative requirements. |
 
 ## Current findings
 
@@ -388,19 +389,17 @@ This session provides two linked signals.
    a clean final round.
 2. **Proactive curation was not durable.** Even the strongest candidate initiated
    curation once, then became warning-responsive and later missed the opportunity
-   altogether. GPT-5.6 Terra shows the same broad pattern: competent curation when
-   reminded, not sustained initiative.
+   altogether. GPT-5.6 Terra provides a related mixed result: it curated early in
+   the initial and final rounds, but its late first-repair selection discarded the
+   task contract it needed to preserve.
 
 The implications have two layers. On the harness side, experiments should test
-better guidance, a concise post-prune acknowledgement oriented toward preserving
-hard-to-reconstruct state, and a post-compaction context made of topical,
-selectable summaries rather than one monolith. On the model side, proactive
-context hygiene may require post-training; it does not yet appear to be behavior
-reliably sampled by models trained around traditional compaction. Both
-self-initiated events observed in the evaluation came from Qwen3.8 models—Qwen3.8
-27B at 70.9% before the warning threshold and Qwen 3.8 Flash at 47% before
-pressure—which is notable but not enough evidence to establish a family-level
-trait.
+better guidance and a post-compaction context made of topical, selectable summaries
+rather than one monolith. On the model side, proactive context hygiene may require
+post-training; it does not yet appear to be behavior reliably sampled by models
+trained around traditional compaction. Qwen3.8 27B, Qwen 3.8 Flash, and GPT-5.6
+Terra all initiated at least one pre-pressure curation event. That is notable, but
+not enough evidence to establish a family-level trait or a durable model habit.
 
 The session used eight delegated subagent sessions: two parallel pairs, plus
 review and documentation checks in the repair rounds. One parallel pair lost two
@@ -410,6 +409,48 @@ The surviving solo documentation check ran at approximately 97% pool occupancy.
 One subagent failure was attributed to an upstream speculative-batch bug in the
 `#24840` class (`spec_i_batch` not shifted by view offset), patched in the fork
 mid-series.
+
+### GPT-5.6 Terra — OpenAI Codex API subscription
+
+**Final curation grade: 5/10.**
+
+This run used `gpt-5.6-terra` at the `high` reasoning level with a 131,072-token
+context window and 32,768-token output limit. It was launched through a standalone
+binary built before the current harness revision, so it retained the legacy
+post-prune accounting feedback. The API exposed only short reasoning summaries and
+encrypted continuation data, not raw reasoning content. Its 39,578 reported
+reasoning tokens therefore did not create the same visible context pressure as
+runs that retain their thinking output.
+
+The session made four `list_context`/`prune_context` cycles, used no
+`summarize_context` call or subagent, and never reached automatic compaction. In
+the initial round, it curated without a warning at 40.0% use: it excluded 21 stale
+orientation, build, and development blocks while retaining the initial task and
+requirements. A second cleanup removed four failed-build and status blocks.
+
+The first repair showed the central failure. The model did not curate again until
+the harness injected its urgent hygiene instruction at 80.5% use. Listing context
+then increased use to 82.9%, leaving little room before compaction. Its resulting
+88-block prune reduced use to 22.2%, but included the initial task prompt and the
+original requirements and public-API reads. Those are hard-to-reconstruct task
+state, not ordinary replaceable file output. The trace contains no explicit model
+response to either legacy accounting message.
+
+During the final repair, the model again acted without a warning at 60.5% use. It
+listed context and excluded 32 older repair-history blocks, reducing use from
+79,278 to 44,242 tokens. This demonstrates that the model could make timely,
+forward-looking selections, but it could not restore the discarded initial task
+prompt. It did reread the requirements and API documents from disk after the
+first-repair prune.
+
+The separate [VWmini evaluation](https://github.com/bendelec/local-agent-cpp-eval/blob/main/evaluations/gpt56-terra-openai-codex-run-01.md)
+reports 81/82 conformance and a 40/100 safety-capped C++ score. Those results are
+not inputs to the curation grade.
+
+The 5/10 grade recognizes repeated pre-pressure initiative and avoidance of
+automatic compaction. It cannot score higher because the late, broad first-repair
+prune removed the initial task and authoritative contract—the material a
+forward-looking working set most needs to retain.
 
 ## Session comparison
 
@@ -432,6 +473,7 @@ assistant thinking and text per 1k output tokens.
 | Laguna S 2.1 (local) | ds4 revived, sigQ8/Q4K + guardrail | 3/10 | `01a06705` | none | 411 | 20.56M | 281k | 0.25 |
 | Muse Glimmer 30B | Lemonade, UD-Q8_K_XL | 4/10 | `01a07220` | none | 66 | 3.40M | 57k | 0.00 |
 | Qwen 3.8 Flash | llama.cpp fork, AP-Q5_K_XL + MTP | 7/10 | `01a0779f` | 8 (review/doc-check, two parallel pairs) | 643 | 33.75M | 594k | 0.08 |
+| GPT-5.6 Terra | OpenAI Codex API subscription | 5/10 | `01a0815c` | none | 145 | 8.36M | 93k | 0.00 |
 
 ## Method and harness notes
 
@@ -446,6 +488,11 @@ One local-serving constraint required an exception: DeepSeek V4 Flash on antirez
 `ds4` used a 100,000-token context window. At 131,072 tokens, the model did not
 fit reliably in the host's 128 GB unified memory and caused serving-side
 out-of-memory failures. Its output limit remained 32,768 tokens.
+
+GPT-5.6 Terra also differs from the current harness condition. The session used a
+standalone binary built before removal of the post-prune accounting feedback and
+before the revised guidance was installed. It is retained as an old-harness
+frontier-model observation, not a test of those revisions.
 
 Lemonade's pi plugin falls back to a 4,096-token output limit when the server
 reports no limit. A `models.json` `maxTokens` override restores the intended

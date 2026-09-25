@@ -97,9 +97,14 @@ Models can corrupt long block IDs, choose an invalid argument shape, or discard
 material that is still needed. In Qwen 3.8 Flash, about 30 unknown IDs across five
 prune calls were corrupted copies of real IDs, and malformed IDs propagated when
 the model copied its own earlier reasoning. The tool reports unknown IDs, but the
-model did not act on that correction repeatedly. A fuzzy `did you mean` correction
-may help, but it adds complexity and risk to a destructive operation; the
-cross-session review must establish whether this is a general problem first.
+model did not act on that correction repeatedly. GPT-5.6 Terra made a different,
+more serious selection error: at 82.9% use in its first repair round, it excluded
+the initial task prompt and authoritative requirements. It later reread the
+requirements from disk, but the initial user task could not be restored that way.
+Avoiding compaction alone is therefore not a sufficient success criterion. A fuzzy `did you
+mean` correction may help with malformed IDs, but it adds complexity and risk to a
+destructive operation; the cross-session review must establish whether this is a
+general problem first.
 
 Curation state is also session-global rather than branch-scoped. The user can
 restore blocks through `/prune`, and durable session history is retained, but
@@ -136,12 +141,13 @@ more serious failure mode: losing nearly all hard-to-reconstruct task state.
 
 ## Next experiments
 
-1. **Evaluate the revised curation guidance.** The next pilot uses concise static
-   guidance to preserve hard-to-reconstruct state while removing closed,
-   replaceable material, and an urgent status message with the same distinction.
-   Compare system instructions, context-status messages, and tool results as
-   channels for future guidance changes. Do not add recurring post-prune feedback
-   unless it has a distinct purpose beyond the existing factual tool result.
+1. **Evaluate the revised curation guidance.** The Qwen 3.8 Max B run adds concise
+   static guidance to preserve hard-to-reconstruct state while removing closed,
+   replaceable material. It also directs the model to treat a long request as
+   small, verifiable work packages and curate between them rather than waiting for
+   final review. Compare this run with the already-running old-harness A variant.
+   Do not add recurring post-prune feedback unless it has a distinct purpose beyond
+   the existing factual tool result.
 2. **Review the current evaluation cross-section.** Classify curation initiative,
    plans that were not executed, ID-copy errors, response to corrections and
    pressure signals, and subagent use. Use this before deciding which harness
