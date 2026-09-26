@@ -73,10 +73,12 @@ pressure-driven behavior, not proactive curation at a work-package boundary.
 ### Proactive curation is not yet durable
 
 The strongest candidate initiated curation early only once, then became dependent
-on warnings. Other models either waited for pressure, required user direction, or
-stopped after a malformed tool call. The current system prompt and status messages
-can support good curation, but do not reliably cause models to keep context hygiene
-in mind during primary work.
+on warnings. Qwen 3.8 Max also made a pre-pressure cleanup at 61.6% use, but
+still needed six automatic compactions across its three rounds. Other models
+either waited for pressure, required user direction, or stopped after a malformed
+tool call. The current system prompt and status messages can support good
+curation, but do not reliably cause models to keep context hygiene in mind during
+primary work.
 
 A capacity threshold is necessary as a safety mechanism, but it cannot identify a
 natural work boundary. A harness-side boundary heuristic would be speculative,
@@ -141,11 +143,12 @@ more serious failure mode: losing nearly all hard-to-reconstruct task state.
 
 ## Next experiments
 
-1. **Evaluate the revised curation guidance.** The Qwen 3.8 Max B run adds concise
-   static guidance to preserve hard-to-reconstruct state while removing closed,
-   replaceable material. It also directs the model to treat a long request as
-   small, verifiable work packages and curate between them rather than waiting for
-   final review. Compare this run with the already-running old-harness A variant.
+1. **Decide whether to evaluate revised curation guidance.** Qwen 3.8 Max has
+   been graded under the earlier guidance; no comparison run has taken place.
+   A possible follow-up would use concise static guidance to preserve
+   hard-to-reconstruct state while removing closed, replaceable material, and to
+   treat long requests as small, verifiable work packages with curation between
+   them. Compare with the recorded session only if that follow-up is chosen.
    Do not add recurring post-prune feedback unless it has a distinct purpose beyond
    the existing factual tool result.
 2. **Review the current evaluation cross-section.** Classify curation initiative,

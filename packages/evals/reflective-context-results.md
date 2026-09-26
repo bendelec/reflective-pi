@@ -24,10 +24,11 @@ substantially less than ten windows.
 | DeepSeek V4 Flash | Venice (hosted); BF16 | 3/10 | It showed the most autonomous intent, but the old tool contract silently accepted fourteen empty selections. One 42-block prune was effective; roughly six force-compactions still followed. |
 | Qwen3.8 27B | Local Lemonade; `UD-Q8-L-XL` | 5/10 | It made three substantial, deliberate cleanups, then relied on six automatic compactions through the more difficult second half of the task. |
 | Laguna S 2.1 | OpenRouter (hosted); full precision | 3/10 | It followed its only hygiene nudge correctly within one second, but the nudge and sixth compaction raced; compaction won by 3 ms. Earlier buildups produced no nudge. |
-| Laguna S 2.1 | Local ds4 (revived); sigQ8/Q4K, guarded | 3/10 | It was the only model other than Qwen3.8 27B and Qwen 3.8 Flash to attempt curation before capacity pressure. Its block choices were correct, but it supplied a comma-separated string instead of an array and never tried again. |
+| Laguna S 2.1 | Local ds4 (revived); sigQ8/Q4K, guarded | 3/10 | It attempted curation before capacity pressure. Its block choices were correct, but it supplied a comma-separated string instead of an array and never tried again. |
 | Muse Glimmer 30B | Local Lemonade; `UD-Q8_K_XL` | 4/10 | It responded well to the hygiene nudge: six incremental prunes reduced use from 71.6% to 16%, avoiding all automatic compactions. It was never proactive, and two prunes removed active repair material. |
 | Qwen 3.8 Flash | Local llama.cpp (EngramHalo fork); `AP-Q5_K_XL` + MTP | 7/10 | It was the first model to curate at a work-package boundary well before pressure, used `summarize_context` appropriately, and selected blocks well. Its initiative then declined, and a single automatic compaction degraded both the C++ result and subsequent curation. |
 | GPT-5.6 Terra | OpenAI Codex API subscription; `gpt-5.6-terra` | 5/10 | It made proactive cleanups in the initial and final rounds and avoided compaction, but its late first-repair prune discarded the initial task and authoritative requirements. |
+| Qwen 3.8 Max | Venice (hosted); `qwen-3-8-max` | 5/10 | It made several substantial, mostly well-targeted cleanups and one appropriate summary, but six automatic compactions still interrupted the three rounds. Unlike Qwen 3.8 Flash (7/10), it did not maintain a useful working set for long enough to avoid repeated compaction. |
 
 ## Current findings
 
@@ -45,6 +46,15 @@ two context-management strategies in one task:
   then mostly responded to hygiene warnings. The present harness can support
   proactive curation, but the behavior does not yet appear to be a stable model
   habit.
+
+The later Qwen 3.8 Max session adds a useful contrast: it could exclude large,
+replaceable work-package histories and once curated at 61.6% use, but six
+compactions still occurred. Flash's early work-boundary curation and selective
+summary kept its working set useful through most of the initial round; Max's
+largest first cleanup came at 93.6%, and its useful later prunes did not keep pace
+with context growth across the three rounds. This difference in sustained control
+of context, not C++ task quality or the mere number of tool calls, explains the
+7/10 versus 5/10 grades.
 
 These observations are encouraging but preliminary. They do not establish that
 context curation improves all models or tasks, nor do they isolate model quality,
@@ -95,9 +105,10 @@ reservation defect. Given the observed generation and tool-traffic rates, they
 cannot represent three separate context refills and are not counted as three
 failures.
 
-No subagents were used, unlike Qwen 3.8 Flash's five delegated sessions and the
+No subagents were used, unlike Qwen 3.8 Flash's eight delegated sessions and the
 local Dwarfstar IQ2 DeepSeek V4 Flash run's four verification passes. The session
-produced the evaluation's largest output (968k tokens) and least effective curation.
+produced 968k output tokens, the largest total before Qwen 3.8 Max, and least
+effective curation.
 Its reconsideration rate was among the most stable—0.30 markers per 1k output
 tokens, equal to Qwen3.8 27B and well below the local Dwarfstar IQ2 DeepSeek V4
 Flash run's 1.35—so stable reasoning did not translate into effective curation.
@@ -191,8 +202,8 @@ until that race.
 
 This was a single approximately 24-hour session with no subagents: the initial
 prompt, two repair prompts, several short continue nudges, and one early
-thinking-style steering message. It is the only model other than Qwen3.8 27B and
-Qwen 3.8 Flash to attempt curation before capacity pressure. Early in orientation, with no context-status message,
+thinking-style steering message. It attempted curation before capacity pressure.
+Early in orientation, with no context-status message,
 it listed the context and selected four correct block IDs. It sent them as a
 comma-separated string rather than the required array. The strict contract returned
 an instructive error—`'ids' must be an array of block ids from list_context`—and
@@ -397,9 +408,10 @@ The implications have two layers. On the harness side, experiments should test
 better guidance and a post-compaction context made of topical, selectable summaries
 rather than one monolith. On the model side, proactive context hygiene may require
 post-training; it does not yet appear to be behavior reliably sampled by models
-trained around traditional compaction. Qwen3.8 27B, Qwen 3.8 Flash, and GPT-5.6
-Terra all initiated at least one pre-pressure curation event. That is notable, but
-not enough evidence to establish a family-level trait or a durable model habit.
+trained around traditional compaction. Qwen3.8 27B, Qwen 3.8 Flash, GPT-5.6
+Terra, and Qwen 3.8 Max all initiated at least one pre-pressure curation event.
+That is notable, but not enough evidence to establish a family-level trait or a
+durable model habit.
 
 The session used eight delegated subagent sessions: two parallel pairs, plus
 review and documentation checks in the repair rounds. One parallel pair lost two
@@ -452,6 +464,58 @@ automatic compaction. It cannot score higher because the late, broad first-repai
 prune removed the initial task and authoritative contract—the material a
 forward-looking working set most needs to retain.
 
+### Qwen 3.8 Max — Venice-hosted `qwen-3-8-max`
+
+**Final curation grade: 5/10.**
+
+The session began on September 8 while GPT-5.6 Terra was finishing and
+continued through September 9. It covered the initial implementation and both
+repair rounds in one main session, with 17 matching subagent sessions. The Venice
+session used a 131,072-token context window and a 32,768-token output limit.
+
+The model made eleven `prune_context` calls. Five large, effective selections
+excluded 91, 35, 61, 28, and 69 blocks; it also summarized two completed worker
+reports. The first 91-block reset came late, at 93.6% use, but deliberately kept
+the original task prompt. The 35-block prune followed the completed pathfinding
+work package, retaining the simulation requirements and current implementation
+material for the next package. Later, at 61.6% use, it excluded 28 superseded
+blocks before updating documentation. This was a genuine pre-pressure cleanup,
+not a reaction to an imminent compaction.
+
+The behavior was not sustained. Six automatic compactions occurred: two during
+initial implementation, two during the first repair, and two during the final
+repair, at 106,834–130,563 tokens before compaction. After a listing at 75.7%
+in the first repair, compaction replaced the listed blocks before the planned
+41-ID prune could execute. Another attempted 39-ID prune just after an earlier
+compaction found nearly all its IDs gone. These were stale-selection races, not
+fabricated IDs. A separate 24-ID selection succeeded on only three blocks because
+most of its IDs had already been removed. Post-compaction two- and three-block
+prunes mostly removed bookkeeping; they did not prevent the next buildup.
+
+The final repair's 69-block prune reduced use from 79.9% to 18.0%, yet two more
+compactions followed before completion. The model did preserve the new repair
+prompt and relevant summaries in that selection. No comparable loss of the task
+contract is evident in the recorded prunes; the problem was failure to repeat
+useful curation early enough, especially across long turns, rather than the
+selection error seen with GPT-5.6 Terra. The one summary was used to retain
+completed worker findings while removing replaceable exploration.
+
+The separate [VWmini evaluation](https://github.com/bendelec/local-agent-cpp-eval/blob/main/evaluations/qwen38-max-venice-run-01.md)
+records 80/82 initial and 81/82 first-repair conformance. The final repair was
+completed in the candidate workspace, but its source had not been archived or
+scored in that evaluation repository. C++ conformance is not an input to this
+curation grade.
+
+The 5/10 grade reflects competent, at times forward-looking use of pruning and
+summarization, offset by six compactions and missed opportunities to curate before
+capacity pressure. Flash earns 7/10 despite its damaging compaction because it
+curated at a natural boundary as early as 47%, preserved hard-to-reconstruct
+findings with a summary, and maintained a selective working set through most of
+the initial round. Max made some comparably sensible selections, but its first
+large prune came at 93.6%, and its later cleanups did not prevent two compactions
+in each round. Neither model sustained early initiative throughout; Max's repeated
+reliance on automatic compaction is the difference, not its C++ conformance.
+
 ## Session comparison
 
 The table covers the main session and eligible subagents only. The main session is
@@ -474,6 +538,7 @@ assistant thinking and text per 1k output tokens.
 | Muse Glimmer 30B | Lemonade, UD-Q8_K_XL | 4/10 | `01a07220` | none | 66 | 3.40M | 57k | 0.00 |
 | Qwen 3.8 Flash | llama.cpp fork, AP-Q5_K_XL + MTP | 7/10 | `01a0779f` | 8 (review/doc-check, two parallel pairs) | 643 | 33.75M | 594k | 0.08 |
 | GPT-5.6 Terra | OpenAI Codex API subscription | 5/10 | `01a0815c` | none | 145 | 8.36M | 93k | 0.00 |
+| Qwen 3.8 Max | Venice (hosted) | 5/10 | `01a08230` | 17 (reviews, tests, doc checks) | 744 | 32.94M | 1,515k | 0.46 |
 
 ## Method and harness notes
 
@@ -492,7 +557,8 @@ out-of-memory failures. Its output limit remained 32,768 tokens.
 GPT-5.6 Terra also differs from the current harness condition. The session used a
 standalone binary built before removal of the post-prune accounting feedback and
 before the revised guidance was installed. It is retained as an old-harness
-frontier-model observation, not a test of those revisions.
+frontier-model observation, not a test of those revisions. The Qwen 3.8 Max
+session also retained post-prune accounting and did not use the revised guidance.
 
 Lemonade's pi plugin falls back to a 4,096-token output limit when the server
 reports no limit. A `models.json` `maxTokens` override restores the intended
@@ -552,11 +618,14 @@ Dwarfstar IQ2 DeepSeek V4 Flash, Venice-hosted BF16 DeepSeek V4 Flash, and Qwen3
 OpenRouter-hosted Laguna S 2.1 has 409 turns rather than 408; the local Dwarfstar
 IQ2 run made six prune calls with three effective calls rather than three total; and
 the OpenRouter-hosted Laguna S 2.1 run used 454k thinking tokens rather than roughly
-359k. Venice-hosted BF16 DeepSeek V4 Flash remained the evaluation's largest
-reasoning run at 810k thinking tokens.
+359k. Qwen 3.8 Max produced the largest reasoning total after its inclusion, at
+1.26M reported thinking tokens (the Venice-hosted BF16 DeepSeek V4 Flash run
+previously led at 810k).
 
 The same pass verified all compaction counts and pre-compaction context sizes, the
 13/5/88 and 62/43/67 block selections, the 18-call decomposition of the
 Venice-hosted BF16 DeepSeek V4 Flash run including its 42-block exclusion, the four
 compactions after the local Dwarfstar IQ2 DeepSeek V4 Flash run's last cleanup, and
-every subagent count in the table.
+every subagent count in the table at that time. Qwen 3.8 Max was accounted for
+later under the same protocol: 17 matching `run` sessions, 744 total assistant
+turns, 32.94M prompt and 1.515M output tokens.
