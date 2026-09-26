@@ -71,6 +71,17 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain(expected);
 		});
 
+		test("directs granular curation of long requests", () => {
+			const prompt = buildSystemPrompt({
+				contextFiles: [],
+				skills: [],
+				cwd: process.cwd(),
+			});
+
+			expect(prompt).toContain("Do not treat a long user request as one work package.");
+			expect(prompt).toContain("curate between them rather than waiting for final review");
+		});
+
 		test("instructs models to resolve pi docs and examples under absolute base paths", () => {
 			const prompt = buildSystemPrompt({
 				contextFiles: [],
