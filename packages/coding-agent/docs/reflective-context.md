@@ -5,9 +5,9 @@ context it sends to the model. The feature is a proof of concept: instead of
 waiting for automatic compaction to summarize a full transcript, the model can
 maintain a focused working set while it still knows which work comes next.
 
-This page describes the user-visible behavior. For the current PoC evidence,
-design decisions, and next experiments, see [Reflective-context PoC
-findings](reflective-context-poc.md). For the session-tree projection that makes
+This page describes the user-visible behavior. For implementation decisions,
+phase-one evidence, and next experiments, see [Reflective-context PoC
+status](reflective-context-poc.md). For the session-tree projection that makes
 it work, see [Context construction](context-building.md). For the lower-level
 block and selector implementation, see [Prune implementation](prune.md).
 

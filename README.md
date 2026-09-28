@@ -95,7 +95,7 @@ On the plus side, all but the weakest models have proven that they are able to
 competently use the tools provided to curate their own context, and that they are able
 to make good decisions on what context to keep and what to prune. I have also
 collected a certain amount of anecdotal evidence both during the evaluation (e.g. Qwen
-3.8 flash max session) and during work on my game project, that sessions where the model
+3.8 Flash session) and during work on my game project, that sessions where the model
 actively curated their own context and kept it focused did provide, on average, better 
 results and less drift than sessions that fell back on automated compaction.
 
@@ -113,24 +113,28 @@ in longer sessions.
 
 ### Next steps
 
-Several iterative attempts to improve the injected system prompt slices and the tool
-hints did, unfortunately, not prove to be sufficient to make models keep the initiative
-to curate their own context. It seems that the training of the models, which encourages
-a goal-focused approach, is sufficient to override meta-cognitive side-tasks even
-for current frontier models (e.g. gpt 5.6 terra).
+The first phase shows that most evaluated models can make useful choices about
+what to keep, prune, or summarize, but none did so consistently throughout a long
+session, including the frontier models. Better prompt and tool hints alone have not
+made early curation reliable. The evaluation cannot establish whether model
+post-training is the cause.
 
-The next step, for me, is therefore to attempt to fine-tune a LoRA for some of the
-evaluated models in an attempt to make it pick up on curating its context at 
-reasonable inflection points (when finishing a sub-task, work package, slice, 
-bug-fix-detour, etc.). This is not something I have attempted before, so it will
-be an adventure in itself.
+The next phase will replace **automatic** summarization-based compaction with a
+hard, harness-led, multi-step cleanup. At the capacity boundary, the harness will
+interrupt work, present the model with the current context blocks, and require it
+to keep, prune, or summarize them for the work ahead before continuing. Manual
+`/compact` remains available; the old automatic summary is not a fallback. If
+cleanup cannot safely make room, the session must stop and ask for intervention
+rather than silently discard task state.
 
+Later directions, in planned order, are training a smaller model to initiate
+curation at natural boundaries and exploring a separate monitoring model that can
+notice when the working model needs to pause. Neither is committed implementation
+work yet.
 
-[PoC findings and next experiments](packages/coding-agent/docs/reflective-context-poc.md)
-summarize the current cross-session evidence, decisions, and open questions.
-[Evaluation results](packages/evals/reflective-context-results.md) retain the
-candidate-by-candidate protocol, session evidence, and grades behind those
-findings.
+[PoC status](packages/coding-agent/docs/reflective-context-poc.md) and the
+[phase-one evaluation archive](evaluations/reflective-context/phase-1/README.md)
+explain the evidence and its limits. The fork's [roadmap](ROADMAP.md) sets priorities.
 
 
 

@@ -1,8 +1,9 @@
 # Reflective-pi roadmap
 
-This is the implementation status and follow-up roadmap for the reflective-context
-proof of concept. Evaluation evidence and model grades live in
-[the evaluation report](packages/evals/reflective-context-results.md).
+This is the fork's own roadmap, not an inherited upstream Pi roadmap. The first
+reflective-context evaluation phase is complete; evidence and model grades live in
+[the phase-one evaluation archive](evaluations/reflective-context/phase-1/README.md).
+The next implementation target is described below.
 
 ## Identity
 
@@ -20,7 +21,7 @@ proof of concept. Evaluation evidence and model grades live in
 ### Model-led context curation
 
 - **Context-status messages** report context use between eligible turns. The
-  derived hygiene threshold tracks automatic compaction: five percentage points
+  derived hygiene threshold tracks automatic compaction: ten percentage points
   below its line, clamped to 50–80%.
 - **One-action curation tools** separate read-only `list_context` from mutating
   `prune_context` and `summarize_context`. A missing mutation payload fails
@@ -29,8 +30,8 @@ proof of concept. Evaluation evidence and model grades live in
   work-package boundaries, not only under capacity pressure.
 - **Block summaries** are implemented. `summarize_context` can use the active
   model or an optional `reflectiveContext.summarizationModel`.
-- **Post-prune accounting** reports whether files represented in excluded blocks
-  are reread during the following 15 turns.
+- **Post-prune accounting feedback** was tested and then removed: re-reading
+  replaceable files is not itself a curation failure.
 
 ### Durable and user-controlled state
 
@@ -52,34 +53,40 @@ proof of concept. Evaluation evidence and model grades live in
   release artifacts, and related tests.
 - Bun applies the configured provider HTTP timeout.
 
-## Follow-up work
+## Next phases (planned order)
 
-### Product and implementation
+1. **Replace automatic compaction with hard, harness-led cleanup.** At the
+   automatic capacity boundary, pause the working model's task, supply a fresh
+   block inventory without requiring `list_context`, and require a bounded series
+   of keep/prune/summarize decisions before resuming. Reserve room to perform the
+   cleanup; if it cannot finish safely or fit the context, stop and request user
+   intervention. Do not fall back to automatic summary compaction. Keep manual
+   `/compact` unchanged. This is planned work, not an implemented feature.
+2. **Investigate training initiative.** If the forced process works, use its
+   decision points and reviewed session examples to explore adapting a capable,
+   affordable smaller model (potentially with a LoRA) to curate at natural work
+   boundaries without being forced. Hold out entire tasks and sessions for
+   evaluation; method and model are not yet selected.
+3. **Explore a monitoring model.** Test a separate, cheaper model that follows the
+   working session, notices finished work packages and other process risks, and
+   can request a pause or prepare candidate summaries. This is a larger harness
+   design, not an implementation commitment for the current Pi fork.
 
-1. **Per-block token accounting.** Attribute server-reported context use to blocks
-   instead of estimating from characters. Surface that information in
-   `list_context` and `/prune` so models and users can weigh relevance against
-   actual recovered capacity. Cache accounting, compaction baseline resets, and
-   tokenizer differences require care. Harness-v2's usage ledger already models
-   the relevant data.
-2. **Manual summary requests in `/prune`.** The selector should be able to request
-   a summary, not only display and restore agent-created ones.
-3. **Branch-scoped curation.** Curation markers are session-global until the
-   harness-v2 lane migration can attach an explicit branch identity.
+These are sequential research priorities, not a promise to pursue all three if
+an earlier phase changes the evidence.
 
-### Evaluation-led design questions
+### Other deferred product work
 
-The current results motivate, but do not yet commit the project to, further work on:
+- Attribute usable per-block capacity more reliably in `list_context` and
+  `/prune`; server-reported context use cannot simply be divided among blocks.
+- Let users request summaries from `/prune`, not only inspect and restore them.
+- Make curation branch-scoped once harness-v2 has explicit branch/lane identity.
+- Explore structured, selectable summaries for cases where manual `/compact` is
+  used; do not reintroduce automatic summarization as a fallback.
 
-- status messages timed to work-package boundaries rather than only capacity
-  thresholds;
-- post-compaction contexts made of topical, selectable summaries instead of a
-  single monolithic project-history summary;
-- more salient placement and wording for curation feedback; and
-- bash-aware re-acquisition accounting and accounting for summarized blocks.
-
-These are hypotheses to evaluate across further sessions, not settled design
-requirements.
+Bash-aware re-acquisition counts and further wording-only hint experiments are
+not current priorities: rereading replaceable files is not a demonstrated loss,
+and more hints have not made initiative reliable.
 
 ## Current limitations and decisions
 

@@ -1,9 +1,9 @@
-# Reflective-context research notes
+# Phase-one reflective-context research notes
 
 This document records mechanism-level observations that inform the
 reflective-context proof of concept but do not belong in a single model record.
 These are working research notes, not final conclusions. The per-model evidence and
-grades are in [reflective-context-results.md](reflective-context-results.md).
+grades are in the [phase-one results](README.md).
 
 ## Severe over-pruning and recovery — 2026-09-05
 
@@ -83,3 +83,20 @@ approach. The same model has otherwise curated autonomously at work-package clos
 and at low capacity. The important result is narrower: the worst observed
 selection was recoverable, and its proximate causes suggest harness changes that
 can be tested directly.
+
+## Replaceability and re-reading
+
+A file read again after pruning is not, by itself, evidence that the earlier
+prune was wrong. Repository files and reproducible command results can be
+reacquired; user instructions, decisions, external observations, and subagent
+findings are harder to reconstruct. In the local serving stacks used for the PoC,
+pruning invalidated the server-side KV cache and caused a cold prefill. Retaining
+an obsolete file read did not preserve a free cached copy; pruning could reduce
+immediate prefill and attention burden, though reacquisition still costs a tool
+call. This is distinct from the severe over-prune above, which lost active task
+state and required expensive reorientation.
+
+Model-visible post-prune re-acquisition feedback was removed because its 15-turn
+signal measured a curation style, not curation quality, and risked rewarding
+retention of easily replaceable files. Bash-mediated reads were also missing from
+that tracker; see the [Qwen Flash record](runs/qwen-3-8-flash-llamacpp.md).

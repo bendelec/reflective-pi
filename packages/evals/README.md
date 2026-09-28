@@ -4,6 +4,10 @@ Pi evals are behavioral, model-backed checks for Pi workflows. They adapt a real
 it in isolated temporary project and agent directories, and attach native Pi session artifacts.
 Use them to measure end-to-end behavior and compare prompts, tools, skills, models, or other harness configurations.
 
+The qualitative [reflective-context phase-one records](../../evaluations/reflective-context/phase-1/README.md)
+are kept outside this runnable eval workspace. Those long-task sessions were reviewed
+separately from the Vitest suites described here.
+
 ## Running evals
 
 Run from the repository root with a default provider and model:
