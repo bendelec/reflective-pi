@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { summarizeBlock } from "../src/core/block-summarization.ts";
 import {
 	type CompactionPreparation,
 	compact,
@@ -8,6 +9,7 @@ import {
 	generateSummary,
 	generateSummaryWithUsage,
 } from "../src/core/compaction/index.ts";
+import type { PruneBlock } from "../src/core/prune.ts";
 
 const { completeSimpleMock } = vi.hoisted(() => ({
 	completeSimpleMock: vi.fn(),
@@ -66,6 +68,24 @@ const mockToolCallResponse: AssistantMessage = {
 };
 
 const messages: AgentMessage[] = [{ role: "user", content: "Summarize this.", timestamp: Date.now() }];
+function userBlock(content: string): PruneBlock {
+	return {
+		entryIds: ["user-1"],
+		entries: [
+			{
+				type: "message",
+				id: "user-1",
+				parentId: null,
+				timestamp: new Date().toISOString(),
+				message: { role: "user", content, timestamp: Date.now() },
+			},
+		],
+	};
+}
+
+const block = userBlock(
+	"Keep the original user requirement and the concrete result in the replacement summary. ".repeat(8),
+);
 
 describe("generateSummary reasoning options", () => {
 	beforeEach(() => {
@@ -202,6 +222,86 @@ describe("generateSummary reasoning options", () => {
 
 		await expect(compact(preparation, createModel(false), "test-key")).rejects.toThrow(
 			"generation hit the token cap",
+		);
+	});
+
+	it("allows reasoning up to the model output cap while keeping a short final summary", async () => {
+		completeSimpleMock.mockResolvedValueOnce({
+			...mockSummaryResponse,
+			content: [
+				{ type: "thinking", thinking: "Long reasoning" },
+				{ type: "text", text: "## Goal\nTest summary" },
+			],
+			usage: { ...mockSummaryResponse.usage, output: 7800, reasoning: 7750 },
+		});
+
+		await expect(summarizeBlock({ block, model: createModel(true) })).resolves.toBe("## Goal\nTest summary");
+		expect(completeSimpleMock.mock.calls[0][2]).toMatchObject({ maxTokens: 8192 });
+	});
+
+	it("clamps the block summary generation budget to the model output cap", async () => {
+		await summarizeBlock({ block, model: createModel(false, 2048) });
+		expect(completeSimpleMock.mock.calls[0][2]).toMatchObject({ maxTokens: 2048 });
+	});
+
+	it("reserves context headroom when a block nearly fills the model window", async () => {
+		await summarizeBlock({ block, model: { ...createModel(true), contextWindow: 4000 } });
+		expect(completeSimpleMock.mock.calls[0][2].maxTokens).toBeLessThan(8192);
+		expect(completeSimpleMock.mock.calls[0][2].maxTokens).toBeGreaterThan(0);
+	});
+
+	it("rejects a block that cannot fit before calling the model", async () => {
+		await expect(
+			summarizeBlock({ block: userBlock("x".repeat(16000)), model: { ...createModel(true), contextWindow: 4000 } }),
+		).rejects.toThrow("Block is too large to summarize within the model's context window");
+		expect(completeSimpleMock).not.toHaveBeenCalled();
+	});
+
+	it("accepts a summary of up to 128 estimated tokens for a short block", async () => {
+		const summary = "x".repeat(512);
+		completeSimpleMock.mockResolvedValueOnce({
+			...mockSummaryResponse,
+			content: [{ type: "text", text: summary }],
+		});
+
+		await expect(summarizeBlock({ block: userBlock("Short note."), model: createModel(true) })).resolves.toBe(
+			summary,
+		);
+	});
+
+	it("rejects a final summary longer than half of a large original block", async () => {
+		completeSimpleMock.mockResolvedValueOnce({
+			...mockSummaryResponse,
+			content: [{ type: "text", text: "Verbose replacement detail. ".repeat(120) }],
+		});
+
+		await expect(summarizeBlock({ block: userBlock("x".repeat(4000)), model: createModel(true) })).rejects.toThrow(
+			/Block summary exceeds ~500 allowed text tokens: ~840 summary tokens for ~1000 original block tokens/,
+		);
+	});
+
+	it("reports the token cap and response metadata when block summarization runs out of tokens", async () => {
+		completeSimpleMock.mockResolvedValueOnce({
+			...mockSummaryResponse,
+			stopReason: "length",
+			content: [{ type: "thinking", thinking: "Only reasoning was generated." }],
+			usage: { ...mockSummaryResponse.usage, output: 8192, reasoning: 8192 },
+		});
+
+		await expect(summarizeBlock({ block, model: createModel(true) })).rejects.toThrow(
+			/generation hit the token cap.*stopReason=length.*outputTokens=8192.*reasoningTokens=8192.*contentTypes=thinking/,
+		);
+	});
+
+	it("reports response metadata when block summarization returns only reasoning", async () => {
+		completeSimpleMock.mockResolvedValueOnce({
+			...mockSummaryResponse,
+			content: [{ type: "thinking", thinking: "Only reasoning was generated." }],
+			usage: { ...mockSummaryResponse.usage, output: 42 },
+		});
+
+		await expect(summarizeBlock({ block, model: createModel(true) })).rejects.toThrow(
+			/returned no text.*stopReason=stop.*outputTokens=42.*contentTypes=thinking/,
 		);
 	});
 
