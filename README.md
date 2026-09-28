@@ -71,6 +71,13 @@ also restoration of messages in case valuable material was erroneously removed.
 See [Reflective context management](packages/coding-agent/docs/reflective-context.md)
 for more details on the reflective context curation mechanism and [Context construction](packages/coding-agent/docs/context-building.md) for the underlying session behavior.
 
+To try this in your own work, copy the
+[example context-curation skill](packages/coding-agent/examples/skills/context-curation/SKILL.md)
+into your project's `.pi/skills/context-curation/SKILL.md`. It encourages curation at
+small work boundaries and offers a starting point for deciding what to keep,
+summarize, or exclude. Adapt it to your project and model; no single skill fits
+every workflow.
+
 ### Evaluation
 
 In addition to using the rxpi PoC during my own work on a C++ based game, I attempted

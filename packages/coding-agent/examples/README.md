@@ -18,6 +18,11 @@ Example extensions demonstrating:
 - External integrations (SSH, file watchers, system theme sync)
 - Custom providers (Anthropic with custom streaming, GitLab Duo)
 
+### [skills/context-curation/](skills/context-curation/)
+An example context-curation skill. Copy it into your project's `.pi/skills/` and
+adapt its guidance to your work. Skills in this examples directory are not loaded
+automatically.
+
 ### [plugins/pi-example-plugin/](plugins/pi-example-plugin/)
 An experimental plugin package that Pi automatically builds into separate Session-worker and TUI Chord facets.
 
