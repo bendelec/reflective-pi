@@ -8,7 +8,11 @@ dist/
 packages/*/dist/
 packages/*/dist-chrome/
 packages/*/dist-firefox/
-packages/ai/src/providers/data/
+# Model data is tracked in this fork (D11 in
+# packages/coding-agent/docs/upstream-base-update.md): a pinned snapshot keeps `npm run check`,
+# `./test.sh` and `build:offline` reproducible. Upstream ignores it and hydrates from live
+# provider APIs, which makes its own tests fail whenever a provider renames a model.
+# Refresh deliberately with `npm run generate:models`, then update the affected tests.
 packages/ai/src/providers/.model-generation-*/
 *.cpuprofile
 

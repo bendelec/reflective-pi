@@ -276,7 +276,10 @@ Remaining:
    `scripts/check-entry-graphs.mjs` and `check-browser-smoke` reference those entries.
 3. Put branch-scoped pruning back on the roadmap. It was deferred pending harness v2, which D9
    deletes, so it must be implemented on `SessionManager` prune entries instead.
-4. D11: track the model-data snapshot so checks and `build:offline` are reproducible.
+4. D9 stages 2-5: harness v2 + pico3 + `packages/agent/src/node.ts`, `session-backends`,
+   `client`/`protocol`/`server`, then the hygiene items. Note that `build:binary` still chains
+   `../protocol` and `../client`, so stage 4 must drop them there too. Stage 1 (the experimental
+   tree, 96 files / -14,877 lines) landed as `a2faa2d38`.
 5. D10: note the absent managed self-update in `[Unreleased]` and trim docs that still describe it.
 6. Push `reflective-context` and the `main` marker after the validation period.
 
@@ -314,13 +317,17 @@ Remaining:
   deployed by hand to `/usr/local/lib/rxpi`: upstream's updater fetches upstream artifacts and
   would replace the fork. The 0.87.1 CHANGELOG section still advertises the feature and is
   immutable, so the divergence is recorded here and in `[Unreleased]`.
-- **D11 — pin the model-data snapshot (decided, still to implement).**
+- **D11 — pin the model-data snapshot (implemented).**
   `packages/ai/src/providers/data` is gitignored upstream, so a green tree depended on untracked
   local state: hydrating from live APIs made upstream's own tests fail on renamed models, and the
   fork's September hydration could not be reconstructed, which is what blocked committing on the
-  pre-merge branch. The tree now carries the published `pi-ai@0.87.1` snapshot. Track it so checks
-  and `build:offline` are reproducible, and treat a refresh as a deliberate act that also updates
-  the affected tests.
+  pre-merge branch. The tree now carries the published `pi-ai@0.87.1` snapshot, and it is
+  **tracked**: the `.gitignore` rule for `packages/ai/src/providers/data/` is removed. `build:binary`
+  also no longer re-hydrates — it runs `packages/ai`'s `build:offline` instead of `build`, because
+  `build` chains `generate-models`, which silently replaced the pinned snapshot with live catalogs
+  on every deploy. Refreshing is now a deliberate act: `npm run generate:models`, then `npm run
+  check` and `./test.sh`, fix the tests pinned to renamed models, and commit the data and test
+  changes together. Biome is unaffected: its `files.includes` covers only `**/*.ts`.
 
 ## Branch topology (post-deviation)
 
