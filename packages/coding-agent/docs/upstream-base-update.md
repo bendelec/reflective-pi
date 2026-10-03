@@ -71,6 +71,9 @@ attributing that growth to individual blocks.
   and it does not reach the CLI, the session format, or the compiled binary. Deleting it would
   conflict on every future merge for no runtime gain. Revisit only if it is ever wired into the
   CLI path.
+  **Superseded on 2026-10-03 by D9: durable is deleted.** Once D7 stopped regular merges,
+  "avoiding future merge conflicts" was no longer a reason to keep it, and its value as a
+  reference for a re-port is nil because upstream's durable has since grown from 27 files to 153.
 - **D4 — usage totals need no fork-side filtering at this tag.** Phase 1 defines no
   fork-specific `usage` kinds, so upstream's "count every usage entry" behaviour is correct
   here. Any future fork-specific kind must be filtered deliberately; that is tracked with the
@@ -276,10 +279,16 @@ Remaining:
    `scripts/check-entry-graphs.mjs` and `check-browser-smoke` reference those entries.
 3. Put branch-scoped pruning back on the roadmap. It was deferred pending harness v2, which D9
    deletes, so it must be implemented on `SessionManager` prune entries instead.
-4. D9 stages 2-5: harness v2 + pico3 + `packages/agent/src/node.ts`, `session-backends`,
-   `client`/`protocol`/`server`, then the hygiene items. Note that `build:binary` still chains
-   `../protocol` and `../client`, so stage 4 must drop them there too. Stage 1 (the experimental
-   tree, 96 files / -14,877 lines) landed as `a2faa2d38`.
+4. D9 deletions are complete and verified green after each stage: stage 1, the experimental tree
+   (96 files / -14,877 lines, `a2faa2d38`); stages 2-4, harness v2 + pico3 + `packages/agent/src
+   /node.ts`, `session-backends`, and `client`/`protocol`/`server`, which had to land together
+   because session-backends and server both consume harness symbols through the agent barrel
+   (311 files / -68,650 lines, `d572d4640`); stage 5, `packages/durable` (27 files), the hygiene
+   items (`pi-agent-old` tsconfig map, `packages/mom` biome glob, `core/index.ts`,
+   `utils/deprecation.ts`) and the docs describing deleted code (tracked files 1553 -> 1477).
+   `packages/agent/src` is now seven files. Branch-scoped pruning moves onto `SessionManager`
+   prune markers as a result; `docs/prune.md`, `docs/reflective-context.md` and `ROADMAP.md` are
+   updated to say so.
 5. D10: note the absent managed self-update in `[Unreleased]` and trim docs that still describe it.
 6. Push `reflective-context` and the `main` marker after the validation period.
 

@@ -143,7 +143,7 @@ rxpi filters excluded entries and substitutes summaries where required. A restor
 
 Markers are session-global rather than branch-scoped in this MVP. A change made on
 one branch can therefore affect another branch. Do not rely on branch-local pruning
-until the planned harness-v2 lane migration provides an explicit branch identity.
+until prune markers carry an explicit branch identity in `SessionManager`.
 
 ## `/prune`: user review and recovery
 
@@ -164,7 +164,7 @@ The selector can inspect and restore summaries, but cannot create one; use
 - Show per-block token use or a trustworthy capacity estimate in `list_context`
   and `/prune`.
 - Allow users to request summaries from `/prune`.
-- Make curation state branch-scoped after the harness-v2 lane migration.
+- Make curation state branch-scoped by recording a branch identity on prune markers.
 
 ## Implementation map
 

@@ -1,9 +1,8 @@
 # Context construction in pi and rxpi
 
 This page explains how the interactive CLI turns durable session history into the
-message list sent to a model. It describes the current `SessionManager` /
-`AgentSession` path used by the interactive CLI, not the newer harness-v2 session
-layer.
+message list sent to a model. It describes the `SessionManager` / `AgentSession`
+path used by the interactive CLI.
 
 ## The two layers
 
@@ -132,18 +131,6 @@ When compaction triggers:
 Automatic compaction therefore replaces the cached transcript with a projection of
 the durable source of truth. It does not remove older entries from the session
 file.
-
-## The newer harness-v2 session layer
-
-`packages/agent/src/harness/session/` contains a separate, newer tree and storage
-implementation used by `packages/evals`. It has its own `Session`, branches and
-lanes, JSONL storage, and compaction path. Its design is specified in
-`packages/agent/docs/harness.md`.
-
-The interactive CLI continues to use `SessionManager` and `AgentSession`. The
-harness-v2 adapter is not yet the interactive CLI's live session path. Similar
-function names exist in both systems, so confirm the package before tracing or
-changing context behavior.
 
 ## Implementation map
 

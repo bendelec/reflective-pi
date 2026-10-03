@@ -358,8 +358,12 @@ container assignment. `tracker.target` is available for read-only bulk inspectio
 without creating proxies. Never mutate through it; all tracked mutations must go
 through `tracker.state` or a proxy obtained from it.
 
-See the [delta investigation findings](../../../durable/docs/chord-delta-findings.md)
-for the full-traversal regression, measured trade-offs, and reproduction commands.
+Full traversals remain allocation-heavy: exhaustive reads of large documents
+retain gigabytes and take longer than the per-mutation costs. A standalone
+ID-addressed graph tracker was prototyped to solve reference reassignment and
+replicated identity, but its memory, import, and hydration costs were
+unacceptable for measured drawing workloads, so the experiment was removed and
+the tree/path implementation remains.
 
 ## Tracker lifecycle
 

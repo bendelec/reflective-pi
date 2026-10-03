@@ -23,9 +23,9 @@ path, then removes excluded and summarized original entries. `buildSessionContex
 adds a stored summary at the original block position. A pruned compaction entry
 still defines the compaction boundary even though its summary is omitted.
 
-Prune state is currently **global to the session**, not scoped to a branch. The
-planned harness-v2 lane migration is the point at which markers can gain a
-branch identity.
+Prune state is currently **global to the session**, not scoped to a branch. Markers
+gain a branch identity when `SessionManager` records the branch they were made on;
+the harness-v2 lane migration that was going to provide it is removed (D9).
 
 ## Atomic blocks
 
@@ -102,4 +102,4 @@ the most useful identity signal without displaying full tool output.
 - Attribute reliable token use to each block and expose it in the selector and
   agent listing.
 - Allow `/prune` to create summaries.
-- Add branch-scoped curation state with harness-v2 lanes.
+- Add branch-scoped curation state by recording a branch identity on prune markers.

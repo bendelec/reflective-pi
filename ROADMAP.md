@@ -80,7 +80,9 @@ an earlier phase changes the evidence.
 - Attribute usable per-block capacity more reliably in `list_context` and
   `/prune`; server-reported context use cannot simply be divided among blocks.
 - Let users request summaries from `/prune`, not only inspect and restore them.
-- Make curation branch-scoped once harness-v2 has explicit branch/lane identity.
+- Make curation branch-scoped by recording a branch identity on prune markers in
+  `SessionManager`. The harness-v2 lanes that were going to provide it are deleted (D9), so this
+  is fork work, not an upstream dependency.
 - Explore structured, selectable summaries for cases where manual `/compact` is
   used; do not reintroduce automatic summarization as a fallback.
 
@@ -108,4 +110,3 @@ and more hints have not made initiative reliable.
   projection, compaction, and curation state.
 - [Context curation internals](packages/coding-agent/docs/prune.md) — atomic
   blocks, previews, selector, and accounting.
-- [Harness-v2 specification](packages/agent/docs/harness.md).
