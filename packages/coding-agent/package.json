@@ -21,16 +21,11 @@
 		},
 		"./client": {
 			"source": "./src/client/index.ts"
-		},
-		"./experimental/plugin": {
-			"source": "./src/experimental/plugin.ts"
 		}
 	},
 	"files": [
 		"dist",
 		"!dist/client",
-		"!dist/experimental",
-		"!dist/cli/experimental",
 		"docs",
 		"examples",
 		"containerization.md",
