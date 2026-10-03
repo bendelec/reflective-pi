@@ -178,3 +178,101 @@ MCP/codemode adoption (needs a decision on `quickjs-wasi` and on stateless Strea
 which upstream does not implement yet), the virtual-model rework (the fork already has its own
 divergent implementation to diff against), durable client/server, and all phase-2 cleanup
 interaction — including how fork-specific `usage` kinds must be filtered once they exist.
+
+## Merge progress (in progress, 2026-10-03)
+
+Branch `integration/upstream-v0.87.1`, merge of `v0.87.1` started with `--no-ff --no-commit`.
+Backup branch: `backup/reflective-context-pre-base-update` (at `d7f4ce20f`). Recover with
+`git merge --abort` or by resetting to the backup.
+
+Done:
+- All 25 conflicts resolved and staged; no markers remain. `npm install --ignore-scripts` exit 0.
+- `session-manager.ts`: adopted upstream projection; added exported `applyPruneState(projection,
+  pruneStateById?, pruneSummaryById?)`; the `buildSessionProjection()` method and the free
+  `buildSessionContext(...)` are prune-aware, so callers must not filter twice. Kept the fork's
+  `let contextEntries` shape in `buildContextEntries` (upstream's early returns would have
+  skipped the trailing prune filter) plus upstream's system-message filtering. Kept fork
+  `replacementByDroppedId` in `createBranchedSession` (upstream's `replacementByLabelId` does
+  not exist post-merge).
+- `compaction.ts`: upstream projection flow won (`estimateProjectedContextTokens`,
+  `findProjectedCutPoint`, projected message collection); the projection is now prune-aware via
+  `applyPruneState`; both compaction message helpers kept because the fork's raw-entry
+  `findCutPoint` path still uses its own.
+- `agent-session.ts`: resolved by a delegated worker; upstream projection consumers, routed
+  model, cache-warmer wiring and the injected initial system message adopted; fork curation
+  tools, prune APIs, context-status hook and block summarization re-applied. Needs review.
+- `scripts/coding-agent-consumer.mjs`: `manifest.bin.pi` replaced with all declared bin targets
+  (this fork declares only `bin.rxpi`).
+- Docs group resolved: upstream content kept, fork sections re-inserted; fork CHANGELOG
+  `[Unreleased]` heading restored (the auto-merge had folded fork entries into upstream's
+  immutable 0.87.1 section).
+
+Outcome (2026-10-03):
+
+- All 25 conflicts resolved. `npm run check` passes every stage except `tsgo`; `biome`,
+  `check:browser-smoke`, shrinkwrap and install-lock validation are clean.
+- `./test.sh`: `packages/agent` 935/935 pass. `packages/coding-agent` 2493 pass with 1 failure
+  (`model-resolver`). `packages/ai` has 31 test failures and 42 type errors.
+- Every remaining `packages/ai` failure is model-catalog drift, not merge damage.
+  `src/providers/data/*.json` is not tracked in git (0 files at our base and at `v0.87.1`), so it
+  is hydrated from live provider APIs. Hydrating today satisfies the models `v0.87.1` added
+  (`grok-4.7`, `gpt-6-astra`) but not tests pinned to models that have since been renamed or
+  removed upstream (`moonshotai/Kimi-K2.6`, `kimi-k2p6`, `glm-5p2`, `deepseek-v4-flash-0731`).
+  Verified: a pristine `v0.87.1` worktree with the same hydrated data produces exactly the same
+  42 type errors, all in `packages/ai` and none anywhere else.
+
+Source fixes applied during the merge:
+
+- `interactive-mode.ts`: re-added the `APP_NAME` import that conflict resolution dropped.
+- `block-summarization.ts`: pass a `normalizeContext(...)` transcript, as `v0.87.1`'s branded
+  `TranscriptContext` requires.
+- `agent-session.ts`: the resume context-status baseline tested `state.messages.length > 0`,
+  which is now always true because `v0.87.1` seeds the system prompt as a leading transcript
+  message, so it fired on fresh sessions and persisted a spurious `contextStatus` entry. It now
+  requires a non-system message.
+- `agent-session.ts`: `_buildBoundaryContext` ignores `contextStatus` notes when computing
+  `canContinue`. A leftover note made a terminal context look continuable, so an extension's
+  `continue: true` forced an extra assistant turn; upstream's `agent-session-boundaries`
+  regression caught it.
+- `block-summarization.ts`: the output reserve had a hard 2048-token floor, so block
+  summarization could never run on a window below roughly 2.1k tokens. It is now window-relative
+  (`max(min(2048, 20%), 10%)`). **This bug predates the merge** — it fails identically at
+  `d7f4ce20f`, so phase 1 was pushed with it. Cherry-pick the fix back.
+- `settings-manager.ts`: D1 applied, `getCacheWarmingMode()` now defaults to `"off"`;
+  `docs/settings.md` and upstream's settings test updated to match.
+
+Test adaptations for fork deviations, each commented in place:
+
+- Leading transcript `system` message: `agent-session-prune`, `agent-loop`.
+- Persisted `contextStatus` note: `agent-session-bash-persistence`, and
+  `9178-tree-during-compaction` (the leaf is the note, so the assertion checks its `parentId` is
+  the navigation target, preserving the regression's intent).
+- Extra `context_hygiene` prompt section and the three curation tools: `system-prompt-updates`,
+  `builtin-tool-strict-mode`.
+- Prompt is ~400 tokens larger: `agent-session-boundaries` token bounds, and
+  `agent-session-compaction`'s oversized-tool-result model window (2600 -> 4100) so the scenario
+  still produces a threshold cut point instead of a spurious overflow.
+- `docs/index.md` links this page so the documentation navigation test passes.
+
+- **D6 — curation tools vs exact-list `setActiveTools` (decided: keep upstream semantics).** The
+  fork seeds `list_context`/`prune_context`/`summarize_context` into the initial loadout, but
+  `setActiveToolsByName` replaces the list exactly, so any explicit loadout change (TUI `/tools`,
+  an extension's `setActiveTools`) silently drops the curation tools. Forcing them back in fixes
+  that but breaks upstream's `6162-extension-active-tools-next-turn` and
+  `builtin-tool-strict-mode` regressions, which pin exact replacement. Kept upstream semantics and
+  adapted the two tests instead: in `builtin-tool-strict-mode` the baseline prompt is now captured
+  after the first extension bind, which still tests that re-registering identical tools is a
+  no-op. The hole is pre-existing (present at `d7f4ce20f`) and is tracked as a separate phase-1
+  question. Note that `createAgentSession` always computes an explicit `initialActiveToolNames`,
+  so "seed curation only into default loadouts" is not available: it would strip curation from
+  every real session, including the TUI.
+
+Remaining:
+
+1. Commit the merge. `package-lock.json` changed, so the commit needs
+   `PI_ALLOW_LOCKFILE_CHANGE=1`.
+2. Build, deploy locally, smoke test; then merge phase 1 into phase 2 and re-verify the
+   forced-cleanup code against the canonical projection (phase 2 predates it).
+3. Cherry-pick the block-summarization reserve fix back to phase 1.
+4. Decide the D6 follow-up: whether `/tools` and extension `setActiveTools` should preserve the
+   curation tools.

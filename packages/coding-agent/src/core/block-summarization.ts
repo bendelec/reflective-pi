@@ -1,5 +1,5 @@
 import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
-import { contentText, type RetryPolicy } from "@earendil-works/pi-ai";
+import { contentText, normalizeContext, type RetryPolicy } from "@earendil-works/pi-ai";
 import type { Model } from "@earendil-works/pi-ai/compat";
 import { estimateMessageTokens, estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { completeSummarization, getSummarizationFailure } from "./compaction/compaction.ts";
@@ -42,7 +42,12 @@ export async function summarizeBlock(request: BlockSummarizationRequest): Promis
 	const conversation = serializeConversation(llmMessages);
 	const promptText = `<context-block>\n${conversation}\n</context-block>`;
 	const estimatedInputTokens = estimateTextTokens(BLOCK_SUMMARY_SYSTEM_PROMPT) + estimateTextTokens(promptText);
-	const contextReserve = Math.max(2048, Math.floor(request.model.contextWindow * 0.1));
+	// Reserve output room without making small-window models unusable: the 2048 floor is
+	// capped at 20% of the window, and never below 10% of it.
+	const contextReserve = Math.max(
+		Math.min(2048, Math.floor(request.model.contextWindow * 0.2)),
+		Math.floor(request.model.contextWindow * 0.1),
+	);
 	const availableOutputTokens = request.model.contextWindow - estimatedInputTokens - contextReserve;
 	if (availableOutputTokens <= 0) {
 		throw new Error("Block is too large to summarize within the model's context window");
@@ -53,7 +58,7 @@ export async function summarizeBlock(request: BlockSummarizationRequest): Promis
 	);
 	const response = await completeSummarization(
 		request.model,
-		{
+		normalizeContext({
 			systemPrompt: BLOCK_SUMMARY_SYSTEM_PROMPT,
 			messages: [
 				{
@@ -62,7 +67,7 @@ export async function summarizeBlock(request: BlockSummarizationRequest): Promis
 					timestamp: Date.now(),
 				},
 			],
-		},
+		}),
 		{
 			maxTokens,
 			apiKey: request.apiKey,

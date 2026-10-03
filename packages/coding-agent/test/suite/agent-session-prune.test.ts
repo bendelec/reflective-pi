@@ -24,13 +24,15 @@ describe("AgentSession setPruneState", () => {
 		harness.setResponses([fauxAssistantMessage("hello back")]);
 		await harness.session.prompt("hello");
 
-		expect(harness.session.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+		// The fork seeds a leading system message into the transcript (upstream v0.87.1
+		// moved the system prompt into `state.messages`).
+		expect(harness.session.messages.map((m) => m.role)).toEqual(["system", "user", "assistant"]);
 
 		const id = userEntryId(harness);
 		harness.session.setPruneState([id], "excluded");
 
-		// Context rebuild drops the pruned user message.
-		expect(harness.session.messages.map((m) => m.role)).toEqual(["assistant"]);
+		// Context rebuild drops the pruned user message; the seeded system message remains.
+		expect(harness.session.messages.map((m) => m.role)).toEqual(["system", "assistant"]);
 		expect(harness.sessionManager.getPruneState(id)).toBe("excluded");
 	});
 
@@ -45,6 +47,9 @@ describe("AgentSession setPruneState", () => {
 		expect(harness.sessionManager.getPruneState(id)).toBe("summarized");
 		expect(harness.sessionManager.getPruneSummary(id)).toBe("The user started the greeting task.");
 		expect(harness.session.messages).toMatchObject([
+			// The transcript starts with the fork-seeded system prompt message
+			// (upstream v0.87.1 moved the system prompt into `state.messages`).
+			{ role: "system" },
 			{
 				role: "custom",
 				content: "[Summary of previously summarized context block]\nThe user started the greeting task.",
@@ -60,10 +65,12 @@ describe("AgentSession setPruneState", () => {
 
 		const id = userEntryId(harness);
 		harness.session.setPruneState([id], "excluded");
-		expect(harness.session.messages.map((m) => m.role)).toEqual(["assistant"]);
+		// Only the user message is pruned; the seeded system message stays (upstream v0.87.1).
+		expect(harness.session.messages.map((m) => m.role)).toEqual(["system", "assistant"]);
 
 		harness.session.setPruneState([id], "included");
-		expect(harness.session.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+		// Restored: leading system message precedes the unpruned user/assistant pair.
+		expect(harness.session.messages.map((m) => m.role)).toEqual(["system", "user", "assistant"]);
 		expect(harness.sessionManager.getPruneState(id)).toBeUndefined();
 	});
 
@@ -79,7 +86,9 @@ describe("AgentSession setPruneState", () => {
 		expect(assistant).toBeDefined();
 
 		harness.session.setPruneState([user, assistant.id], "excluded");
-		expect(harness.session.messages).toEqual([]);
+		// Both block entries are pruned; only the seeded system message remains
+		// (upstream v0.87.1 moved the system prompt into the transcript).
+		expect(harness.session.messages.map((m) => m.role)).toEqual(["system"]);
 	});
 
 	it("prunes context via the prune_context tool", async () => {
@@ -87,7 +96,8 @@ describe("AgentSession setPruneState", () => {
 		harness.setResponses([fauxAssistantMessage("hello back")]);
 		await harness.session.prompt("hello");
 
-		expect(harness.session.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+		// Leading system message is part of the transcript (upstream v0.87.1).
+		expect(harness.session.messages.map((m) => m.role)).toEqual(["system", "user", "assistant"]);
 
 		// The id of the first user message, as the tool would list it.
 		const user = userEntryId(harness);

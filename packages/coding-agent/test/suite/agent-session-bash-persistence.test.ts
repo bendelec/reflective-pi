@@ -223,6 +223,9 @@ describe("AgentSession bash and persistence characterization", () => {
 		await harness.session.prompt("start");
 
 		const entries = harness.sessionManager.getEntries();
+		// The prompt is declared by the first request, after the queued custom message.
+		// The fork persists a contextStatus note after the first tool-work turn, adding
+		// one more message entry than upstream.
 		expect(entries.map((entry) => entry.type)).toEqual([
 			"custom_message",
 			"message",
@@ -230,9 +233,13 @@ describe("AgentSession bash and persistence characterization", () => {
 			"message",
 			"message",
 			"message",
+			"message",
 		]);
+		// Roles include the fork's leading system message and the persisted contextStatus
+		// note appended after the tool-work turn.
 		expect(harness.session.messages.map((message) => message.role)).toEqual([
 			"custom",
+			"system",
 			"user",
 			"assistant",
 			"toolResult",

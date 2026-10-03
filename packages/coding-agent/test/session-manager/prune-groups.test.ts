@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { JsonObject } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { groupPruneBlocks, previewBlock } from "../../src/core/prune.ts";
 import type { SessionEntry, SessionMessageEntry } from "../../src/core/session-manager.ts";
@@ -179,12 +180,7 @@ describe("previewBlock", () => {
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 	};
 
-	function assistantTool(
-		id: string,
-		parentId: string | null,
-		name: string,
-		args: Record<string, unknown>,
-	): SessionMessageEntry {
+	function assistantTool(id: string, parentId: string | null, name: string, args: JsonObject): SessionMessageEntry {
 		return entry(id, parentId, {
 			role: "assistant",
 			content: [{ type: "toolCall" as const, id: `call-${name}`, name, arguments: args }],
