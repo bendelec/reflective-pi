@@ -269,10 +269,95 @@ Test adaptations for fork deviations, each commented in place:
 
 Remaining:
 
-1. Commit the merge. `package-lock.json` changed, so the commit needs
-   `PI_ALLOW_LOCKFILE_CHANGE=1`.
-2. Build, deploy locally, smoke test; then merge phase 1 into phase 2 and re-verify the
-   forced-cleanup code against the canonical projection (phase 2 predates it).
-3. Cherry-pick the block-summarization reserve fix back to phase 1.
-4. Decide the D6 follow-up: whether `/tools` and extension `setActiveTools` should preserve the
+1. Decide the D6 follow-up: whether `/tools` and extension `setActiveTools` should preserve the
    curation tools.
+2. Delete the surface approved under D9, starting with harness v2, after a dependency sweep: the
+   `packages/agent/src/index.ts` barrel re-exports it, and the package export maps,
+   `scripts/check-entry-graphs.mjs` and `check-browser-smoke` reference those entries.
+3. Put branch-scoped pruning back on the roadmap. It was deferred pending harness v2, which D9
+   deletes, so it must be implemented on `SessionManager` prune entries instead.
+4. D11: track the model-data snapshot so checks and `build:offline` are reproducible.
+5. D10: note the absent managed self-update in `[Unreleased]` and trim docs that still describe it.
+6. Push `reflective-context` and the `main` marker after the validation period.
+
+## Deviation decisions (2026-10-03)
+
+- **D7 — stop regular merges; cherry-pick only (decided).** Upstream shipped 5 releases in 11 days
+  after v0.87.1 and reached 1.0.1, moved the harness out of `pi-agent-core` into `pi-durable`
+  (`packages/agent` 286 -> 20 files), broke the toolchain (TypeScript 7, `tsgo` -> `tsc`, `tsx`
+  removed), and removed both `image-models.generated.ts` and the shrinkwrap script. The next merge
+  would land on a relocated architecture and concentrate in `agent-session.ts`, the file upstream
+  will replace when `coding-agent` moves onto durable. Re-evaluate only when upstream wires durable
+  into the shipping path; that work is a designed re-port of curation, not a merge.
+- **D8 — no MCP (decided).** Upstream's MCP is client-only, ~13.4k lines with tests and docs, stdio
+  plus streamable HTTP (session-based, not stateless; stdio supervises subprocesses), and OAuth
+  adapted from the official SDK with only `cross-spawn` added. It is not separable: the integration
+  imports `codemode` and `tool-search`, defaults server exposure to codemode, and requires a new
+  tool API (`exposure`, `namespace`, `outputSchema`, `prepareLoadout`, nested-call events) plus 30
+  follow-up fixes, so cherry-picking it would mean moving the fork's three hottest files. If MCP is
+  ever needed and existing extensions are not enough, roll our own.
+- **D9 — delete carried-but-unused surface (decided).** Harness v2 first:
+  `packages/agent/src/harness` (108 files / 30.8k lines, plus pico3 24 / 8k) is runtime-dead in the
+  shipped path — its only reachability is barrel re-exports in `packages/agent/src/index.ts`, and
+  there are zero `AgentHarness` references outside `src/experimental`. Also `session-backends`
+  (21 / 3.9k, zero importers), `src/experimental` (55 / 10.9k plus 18 test files / 3.2k that ship
+  nowhere), `client`/`protocol`/`server` if experimental goes, and the hygiene items (stale
+  `packages/agent-old` tsconfig map, `core/index.ts`, `utils/deprecation.ts`,
+  `harness/runtime/index.ts`). Keep `packages/durable` (27 / 8.5k, zero importers, absent from the
+  binary, load-bearing only for `check:browser-smoke`) as the reference for the eventual durable
+  re-port. Consequence: features deferred while waiting for harness v2 — primarily branch-scoped
+  pruning — must be implemented on `SessionManager` instead.
+- **D10 — upstream's managed self-update is intentionally absent (decided).** v0.87.1 added
+  installer-managed updates (`cleanupManagedInstall`, `runManagedSelfUpdate`,
+  `verifyManagedRelease`, staged atomic activation); the merge kept the fork's side of
+  `package-manager-cli.ts` and `main.ts`, so none of it landed. That is correct for rxpi, which is
+  deployed by hand to `/usr/local/lib/rxpi`: upstream's updater fetches upstream artifacts and
+  would replace the fork. The 0.87.1 CHANGELOG section still advertises the feature and is
+  immutable, so the divergence is recorded here and in `[Unreleased]`.
+- **D11 — pin the model-data snapshot (decided, still to implement).**
+  `packages/ai/src/providers/data` is gitignored upstream, so a green tree depended on untracked
+  local state: hydrating from live APIs made upstream's own tests fail on renamed models, and the
+  fork's September hydration could not be reconstructed, which is what blocked committing on the
+  pre-merge branch. The tree now carries the published `pi-ai@0.87.1` snapshot. Track it so checks
+  and `build:offline` are reproducible, and treat a refresh as a deliberate act that also updates
+  the affected tests.
+
+## Branch topology (post-deviation)
+
+- `reflective-context` is the fork's default branch on GitHub and carries all fork changes;
+  `origin/HEAD` points at it. A stale local `refs/remotes/origin/HEAD` still said `main` until
+  `git remote set-head origin -a` repaired it: git writes that ref at clone time and `git fetch`
+  never updates it.
+- `main` marks the last upstream state the fork integrated and is now frozen: it points at
+  `v0.87.1` (`f07218c4d`) and tracks `origin/main`, not `upstream/main`. Under D7 nothing
+  fast-forwards it any more; a cherry-pick survey reads `upstream/main` directly.
+- The historical process — update the fork's `main` to upstream's, push it, then merge it into
+  `reflective-context` — was followed up to 2026-09-05: `origin/main` is `9841914c7`
+  (v0.85.0-5-g9841914c7), exactly the second parent of merge `f942ca684`. The merge source was the
+  local branch `upstream-main`, and local `main` lagged at `605a1b038` (Sep 1).
+- The v0.87.1 merge did **not** follow it: the tag was merged directly into a scratch branch
+  (`integration/upstream-v0.87.1`) and fast-forwarded into `reflective-context`, leaving
+  `origin/main` at the Sep 5 marker. Repaired locally by pointing `main` at `v0.87.1`; pushing
+  `origin/main` to match is deferred with the rest of the validation period.
+
+### The invariant, and how it drifted
+
+The agreed process was never written down, and each merge deviated a little further:
+
+- Intended invariant: local `main` == `origin/main` == the exact upstream commit last integrated
+  into `reflective-context`.
+- 2026-09-05 (`f942ca684`): `origin/main` was correct (`9841914c7`, the merge's second parent), but
+  the merge source was a separate local branch `upstream-main` and local `main` lagged at
+  `605a1b038` (Sep 1). Under the invariant that branch was redundant.
+- 2026-10-03 (`4d452db30`): `main` was bypassed entirely — `v0.87.1` was merged from the tag into a
+  scratch branch and fast-forwarded into `reflective-context`.
+
+State after repair, and the process under D7 (cherry-pick only):
+
+- `main` is a frozen marker of the last integrated upstream state: `v0.87.1` (`f07218c4d`), tracking
+  `origin/main`. Nothing fast-forwards it any more.
+- The redundant local branch `upstream-main` is deleted. Cherry-pick surveys read the
+  remote-tracking ref directly (`git log v0.87.1..upstream/main`), which needs no local branch.
+- `origin/main` still shows `9841914c7` until the marker is pushed with the rest of the release.
+- Verify with `git rev-parse main origin/main` (equal once pushed) and
+  `git merge-base --is-ancestor main reflective-context && echo ok`.
