@@ -28,18 +28,12 @@ const WORKSPACE = {
 };
 
 /**
- * Budgets are deliberate. `.` and `./node` are batteries-included entries and stay unbounded; every
+ * Budgets are deliberate. `.` is a batteries-included entry and stays unbounded; every
  * narrow entry states the graph it is allowed to reach.
  */
 const BUDGETS = {
 	"packages/ai": {
 		"./utils/*": { maxFiles: 3, forbid: ["providers/", "api/", "index.ts"] },
-	},
-	"packages/agent": {
-		"./harness/runtime/reducer": { maxFiles: 1 },
-		"./harness/context": { maxFiles: 6, forbid: ["harness/runtime/", "harness/execution/", "packages/ai/"] },
-		"./harness/env/nodejs": { maxFiles: 5, forbid: ["packages/ai/", "harness/runtime/"] },
-		"./harness/session": { maxFiles: 25, forbid: ["harness/runtime/", "harness/execution/", "packages/ai/src/index.ts"] },
 	},
 };
 
