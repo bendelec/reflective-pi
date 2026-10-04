@@ -598,22 +598,21 @@ export function applyPruneState(
 			return { ...projected, messages: [] };
 		}
 		if (state === "summarized") {
+			changed = true;
 			const summary = pruneSummaryById?.get(projected.sourceEntry.id);
-			if (summary) {
-				changed = true;
-				return {
-					...projected,
-					messages: [
-						createCustomMessage(
-							"context_summary",
-							`[Summary of previously summarized context block]\n${summary}`,
-							false,
-							undefined,
-							projected.sourceEntry.timestamp,
-						),
-					],
-				};
-			}
+			if (!summary) return { ...projected, messages: [] };
+			return {
+				...projected,
+				messages: [
+					createCustomMessage(
+						"context_summary",
+						`[Summary of previously summarized context block]\n${summary}`,
+						false,
+						undefined,
+						projected.sourceEntry.timestamp,
+					),
+				],
+			};
 		}
 		return projected;
 	});
@@ -1557,6 +1556,11 @@ export class SessionManager {
 	 */
 	getPruneStateMap(): ReadonlyMap<string, PruneState> {
 		return this.pruneStateById;
+	}
+
+	/** Returns persisted replacement summaries keyed by the summarized block's first entry. */
+	getPruneSummaryMap(): ReadonlyMap<string, string> {
+		return this.pruneSummaryById;
 	}
 
 	/** Return the persisted replacement summary for a summarized block's first entry. */

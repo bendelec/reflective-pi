@@ -914,13 +914,14 @@ export function prepareCompaction(
 	pathEntries: SessionEntry[],
 	settings: CompactionSettings,
 	pruneStateById?: ReadonlyMap<string, PruneState>,
+	pruneSummaryById?: ReadonlyMap<string, string>,
 ): CompactionPreparation | undefined {
 	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction") {
 		return undefined;
 	}
 
 	// Pruned blocks must not contribute tokens, cut points, or summary input.
-	const projection = applyPruneState(buildSessionProjection(pathEntries), pruneStateById);
+	const projection = applyPruneState(buildSessionProjection(pathEntries), pruneStateById, pruneSummaryById);
 	const projectedEntries = projection.entries;
 	const sourceEntries = projectedEntries.map((entry) => entry.sourceEntry);
 	// The newest compaction is projected first. Older compaction entries can still

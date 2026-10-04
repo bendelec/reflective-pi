@@ -2625,8 +2625,9 @@ export class AgentSession {
 
 			const pathEntries = this.sessionManager.getBranch();
 			const pruneStateById = this.sessionManager.getPruneStateMap();
+			const pruneSummaryById = this.sessionManager.getPruneSummaryMap();
 
-			const preparation = prepareCompaction(pathEntries, settings, pruneStateById);
+			const preparation = prepareCompaction(pathEntries, settings, pruneStateById, pruneSummaryById);
 			if (!preparation) {
 				// Check why we can't compact
 				const lastEntry = pathEntries[pathEntries.length - 1];
@@ -2961,8 +2962,9 @@ export class AgentSession {
 
 			const pathEntries = this.sessionManager.getBranch();
 			const pruneStateById = this.sessionManager.getPruneStateMap();
+			const pruneSummaryById = this.sessionManager.getPruneSummaryMap();
 
-			const preparation = prepareCompaction(pathEntries, settings, pruneStateById);
+			const preparation = prepareCompaction(pathEntries, settings, pruneStateById, pruneSummaryById);
 			if (!preparation) {
 				return false;
 			}

@@ -1,4 +1,6 @@
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, type Harness } from "./harness.ts";
 
@@ -136,6 +138,185 @@ describe("AgentSession setPruneState", () => {
 
 		expect(harness.sessionManager.getPruneState(user)).toBe("summarized");
 		expect(harness.sessionManager.getPruneSummary(user)).toBe("The active model summarized the greeting task.");
+	});
+
+	it("summarizes a tool exchange without leaking the original call or large results into later requests", async () => {
+		const largeOutputA = "LARGE_TOOL_OUTPUT_A".repeat(2000);
+		const largeOutputB = "LARGE_TOOL_OUTPUT_B".repeat(2000);
+		const makeLargeTool = (name: string, output: string): AgentTool => ({
+			name,
+			label: name,
+			description: name,
+			parameters: Type.Object({}),
+			execute: async () => ({ content: [{ type: "text", text: output }], details: {} }),
+		});
+		const harness = track(
+			await createHarness({
+				models: [{ id: "test-model", contextWindow: 100000 }],
+				tools: [makeLargeTool("large_a", largeOutputA), makeLargeTool("large_b", largeOutputB)],
+			}),
+		);
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("large_a", {}), fauxToolCall("large_b", {})], { stopReason: "toolUse" }),
+			fauxAssistantMessage("reports produced"),
+		]);
+		await harness.session.prompt("generate both reports");
+
+		const toolCallEntry = harness.sessionManager
+			.getEntries()
+			.find(
+				(entry) =>
+					entry.type === "message" &&
+					entry.message.role === "assistant" &&
+					entry.message.content.some((part) => part.type === "toolCall"),
+			);
+		if (toolCallEntry?.type !== "message" || toolCallEntry.message.role !== "assistant") {
+			throw new Error("expected persisted tool call message");
+		}
+		const id = toolCallEntry.id;
+		let summarizeTurnNextRequest: typeof harness.session.messages = [];
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("summarize_context", { ids: [id] })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("Both reports completed successfully."),
+			(context) => {
+				summarizeTurnNextRequest = context.messages;
+				return fauxAssistantMessage("summary saved");
+			},
+		]);
+		await harness.session.prompt("summarize the report block");
+
+		let nextRequestMessages: typeof harness.session.messages = [];
+		harness.setResponses([
+			(context) => {
+				nextRequestMessages = context.messages;
+				return fauxAssistantMessage("continued");
+			},
+		]);
+		await harness.session.prompt("continue");
+
+		const originalToolCallIds = toolCallEntry.message.content.flatMap((part) =>
+			part.type === "toolCall" ? [part.id] : [],
+		);
+		for (const requestMessages of [summarizeTurnNextRequest, nextRequestMessages]) {
+			const summaryMessages = requestMessages.filter(
+				(message) =>
+					message.role === "user" &&
+					Array.isArray(message.content) &&
+					message.content.some(
+						(part) =>
+							part.type === "text" && part.text.startsWith("[Summary of previously summarized context block]\n"),
+					),
+			);
+			expect(summaryMessages).toHaveLength(1);
+			expect(JSON.stringify(summaryMessages)).toContain("Both reports completed successfully.");
+			expect(
+				requestMessages.some(
+					(message) =>
+						message.role === "assistant" &&
+						message.content.some(
+							(part) => part.type === "toolCall" && (part.name === "large_a" || part.name === "large_b"),
+						),
+				),
+			).toBe(false);
+			expect(
+				requestMessages.some(
+					(message) => message.role === "toolResult" && originalToolCallIds.includes(message.toolCallId),
+				),
+			).toBe(false);
+			expect(
+				requestMessages.some(
+					(message) =>
+						message.role === "toolResult" &&
+						message.content.some(
+							(part) => part.type === "text" && (part.text === largeOutputA || part.text === largeOutputB),
+						),
+				),
+			).toBe(false);
+		}
+		expect(JSON.stringify(nextRequestMessages)).toContain("Both reports completed successfully.");
+		expect(harness.sessionManager.getPruneState(id)).toBe("summarized");
+		const originalToolResultIds = harness.sessionManager
+			.getEntries()
+			.filter(
+				(entry) =>
+					entry.type === "message" &&
+					entry.message.role === "toolResult" &&
+					originalToolCallIds.includes(entry.message.toolCallId),
+			)
+			.map((entry) => entry.id);
+		harness.session.setPruneState([id, ...originalToolResultIds], "included");
+		expect(
+			harness.sessionManager
+				.buildSessionContext()
+				.messages.some(
+					(message) =>
+						message.role === "assistant" &&
+						message.content.some((part) => part.type === "toolCall" && part.name === "large_a"),
+				),
+		).toBe(true);
+		expect(
+			harness.sessionManager
+				.buildSessionContext()
+				.messages.some(
+					(message) =>
+						message.role === "toolResult" &&
+						message.content.some((part) => part.type === "text" && part.text === largeOutputA),
+				),
+		).toBe(true);
+	});
+
+	it("manual compaction summarizes pruned context, including prune state inherited from a sibling", async () => {
+		const harness = track(
+			await createHarness({
+				models: [{ id: "test-model", contextWindow: 100000 }],
+				settings: { compaction: { keepRecentTokens: 1 } },
+			}),
+		);
+		const rawOutput = "RAW_HUGE_SIBLING_OUTPUT".repeat(2000);
+		const callId = harness.sessionManager.appendMessage(
+			fauxAssistantMessage([fauxToolCall("read", { path: "secret.txt" })], { stopReason: "toolUse" }),
+		);
+		const call = harness.sessionManager.getEntry(callId);
+		if (call?.type !== "message" || call.message.role !== "assistant") throw new Error("expected tool call entry");
+		const toolCallId = call.message.content.find((part) => part.type === "toolCall")?.id;
+		if (!toolCallId) throw new Error("expected tool call id");
+		const resultId = harness.sessionManager.appendMessage({
+			role: "toolResult",
+			toolCallId,
+			toolName: "read",
+			content: [{ type: "text", text: rawOutput }],
+			isError: false,
+			timestamp: Date.now(),
+		});
+		const savedSummary = "A sibling inspected the configuration and confirmed the required setting.";
+		harness.sessionManager.appendPruneChange(callId, "summarized", savedSummary);
+		harness.sessionManager.appendPruneChange(resultId, "excluded");
+		harness.sessionManager.branch(callId);
+		harness.sessionManager.appendMessage({
+			role: "user",
+			content: "Continue from the sibling branch",
+			timestamp: Date.now(),
+		});
+		harness.sessionManager.appendMessage(fauxAssistantMessage("I can continue."));
+		harness.session.refreshContext();
+
+		const summaryPrompts: string[] = [];
+		harness.setResponses([
+			(context) => {
+				summaryPrompts.push(JSON.stringify(context.messages));
+				return fauxAssistantMessage("Compacted sibling context.");
+			},
+			(context) => {
+				summaryPrompts.push(JSON.stringify(context.messages));
+				return fauxAssistantMessage("Compacted turn prefix.");
+			},
+		]);
+		await harness.session.compact();
+
+		const fullPrompt = summaryPrompts.join("\\n");
+		expect(fullPrompt).toContain(savedSummary);
+		expect(fullPrompt).not.toContain("RAW_HUGE_SIBLING_OUTPUT");
+		expect(fullPrompt).not.toContain("secret.txt");
 	});
 
 	it("summarizes a selected block with the configured secondary model", async () => {

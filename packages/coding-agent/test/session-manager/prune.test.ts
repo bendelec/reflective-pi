@@ -1,3 +1,4 @@
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { mkdirSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -301,5 +302,51 @@ describe("SessionManager prune persistence", () => {
 			{ role: "assistant" },
 			{ role: "user", content: "followup" },
 		]);
+	});
+
+	it("keeps every summarized tool exchange entry out of context after reload", () => {
+		tempDir = join(tmpdir(), `prune-tool-exchange-${Date.now()}-${Math.random()}`);
+		mkdirSync(tempDir, { recursive: true });
+		const session = SessionManager.create("/tmp/prune-proj", tempDir);
+		const call = fauxAssistantMessage(
+			[fauxToolCall("read", { path: "large-a.txt" }), fauxToolCall("read", { path: "large-b.txt" })],
+			{ stopReason: "toolUse" },
+		);
+		const callId = session.appendMessage(call);
+		const toolCallIds = call.content.filter((part) => part.type === "toolCall").map((part) => part.id);
+		for (const [index, toolCallId] of toolCallIds.entries()) {
+			session.appendMessage({
+				role: "toolResult",
+				toolCallId,
+				toolName: "read",
+				content: [{ type: "text", text: `large tool output ${index}` }],
+				isError: false,
+				timestamp: index + 1,
+			});
+		}
+		const resultIds = session
+			.getEntries()
+			.filter((entry) => entry.type === "message" && entry.message.role === "toolResult")
+			.map((entry) => entry.id);
+		session.appendMessage(assistantMessage("follow-up", 3));
+		session.appendPruneChange(callId, "summarized", "The files were inspected.");
+		for (const resultId of resultIds) session.appendPruneChange(resultId, "summarized");
+
+		const reopened = SessionManager.open(session.getSessionFile()!);
+		const projected = reopened.buildSessionProjection();
+		expect(projected.messages).toMatchObject([
+			{ role: "custom", content: "[Summary of previously summarized context block]\nThe files were inspected." },
+			{ role: "assistant" },
+		]);
+		expect(
+			projected.messages.some(
+				(message) => message.role === "assistant" && message.content.some((part) => part.type === "toolCall"),
+			),
+		).toBe(false);
+		for (const resultId of resultIds) {
+			expect(projected.entries.find((entry) => entry.sourceEntry.id === resultId)?.messages).toEqual([]);
+			expect(reopened.getEntry(resultId)).toMatchObject({ type: "message", message: { role: "toolResult" } });
+		}
+		expect(reopened.getEntry(callId)).toMatchObject({ type: "message", message: { role: "assistant" } });
 	});
 });
