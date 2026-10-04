@@ -156,6 +156,70 @@ describe("TreeSelectorComponent", () => {
 			expect(list.getSelectedNode()?.entry.id).toBe("user-2");
 		});
 
+		test("hides context restore markers by default and shows active leaves in all mode", () => {
+			const entries: SessionEntry[] = [
+				userMessage("user-1", null, "hello"),
+				{
+					type: "context_edit_cancel",
+					id: "restore-1",
+					parentId: "user-1",
+					timestamp: new Date().toISOString(),
+					targetId: "target-1",
+				},
+			];
+			const tree = buildTree(entries);
+			const defaultSelector = new TreeSelectorComponent(
+				tree,
+				"restore-1",
+				24,
+				() => {},
+				() => {},
+			);
+			expect(defaultSelector.getTreeList().getSelectedNode()?.entry.id).toBe("user-1");
+
+			const allSelector = new TreeSelectorComponent(
+				tree,
+				"restore-1",
+				24,
+				() => {},
+				() => {},
+				undefined,
+				undefined,
+				"all",
+			);
+			expect(allSelector.getTreeList().getSelectedNode()?.entry.id).toBe("restore-1");
+			const rendered = allSelector.getTreeList().render(200).map(stripVTControlCharacters).join("\n");
+			expect(rendered).toContain("• [context restore: target-1]");
+		});
+
+		test("searches context restore markers by label and target id", () => {
+			const entries: SessionEntry[] = [
+				userMessage("user-1", null, "hello"),
+				{
+					type: "context_edit_cancel",
+					id: "restore-1",
+					parentId: "user-1",
+					timestamp: new Date().toISOString(),
+					targetId: "target-1",
+				},
+			];
+			const selector = new TreeSelectorComponent(
+				buildTree(entries),
+				"user-1",
+				24,
+				() => {},
+				() => {},
+				undefined,
+				undefined,
+				"all",
+			);
+
+			for (const character of "context restore target-1") selector.handleInput(character);
+
+			expect(selector.getTreeList().getSelectedNode()?.entry.id).toBe("restore-1");
+			expect(selector.getTreeList().render(200).map(stripVTControlCharacters).join("\n")).toContain("(1/1) [all]");
+		});
+
 		test("hides context edits by default and labels them in all mode", () => {
 			const entries: SessionEntry[] = [
 				userMessage("user-1", null, "hello"),

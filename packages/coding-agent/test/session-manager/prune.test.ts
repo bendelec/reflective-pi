@@ -1,11 +1,12 @@
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
-import { mkdirSync, rmSync } from "fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	buildContextEntries,
 	buildSessionContext,
+	CURRENT_SESSION_VERSION,
 	type PruneEntry,
 	type PruneState,
 	type SessionEntry,
@@ -42,6 +43,10 @@ function msg(id: string, parentId: string | null, role: "user" | "assistant", te
 
 function pruneMap(...pairs: [string, PruneState][]): Map<string, PruneState> {
 	return new Map(pairs);
+}
+
+function legacyPrune(id: string, parentId: string, targetId: string, state: PruneState, summary?: string): PruneEntry {
+	return { type: "prune", id, parentId, targetId, state, summary, timestamp: "2025-01-01T00:00:00Z" };
 }
 
 function assistantMessage(text: string, timestamp: number) {
@@ -126,12 +131,12 @@ describe("buildContextEntries prune filtering", () => {
 			msg("4", "3", "assistant", "secret reply"),
 		];
 
-		const ctx = buildSessionContext(entries, undefined, undefined, pruneMap(["3", "excluded"]));
+		const ctx = buildSessionContext([...entries, legacyPrune("5", "4", "3", "excluded")]);
 		expect(ctx.messages.map((m) => m.role)).toEqual(["user", "assistant", "assistant"]);
 	});
 });
 
-describe("SessionManager prune markers", () => {
+describe("SessionManager curation markers", () => {
 	it("sets and gets prune state", () => {
 		const session = SessionManager.inMemory();
 
@@ -139,12 +144,14 @@ describe("SessionManager prune markers", () => {
 
 		expect(session.getPruneState(msgId)).toBeUndefined();
 
-		session.appendPruneChange(msgId, "excluded");
+		session.appendContextChange(msgId, "excluded");
 		expect(session.getPruneState(msgId)).toBe("excluded");
 
-		const pruneEntry = session.getEntries().find((entry) => entry.type === "prune") as PruneEntry;
-		expect(pruneEntry.targetId).toBe(msgId);
-		expect(pruneEntry.state).toBe("excluded");
+		expect(session.getEntries().find((entry) => entry.type === "context_edit")).toMatchObject({
+			targetId: msgId,
+			replacement: null,
+		});
+		expect(session.getEntries().some((entry) => entry.type === "prune")).toBe(false);
 	});
 
 	it("replaces a summarized message with its persisted context summary", () => {
@@ -152,14 +159,14 @@ describe("SessionManager prune markers", () => {
 		const msgId = session.appendMessage({ role: "user", content: "full original context", timestamp: 1 });
 		session.appendMessage(assistantMessage("follow-up", 2));
 
-		session.appendPruneChange(msgId, "summarized", "The original request established the API boundary.");
+		session.appendContextChange(msgId, "summarized", "The original request established the API boundary.");
 
 		expect(session.getPruneState(msgId)).toBe("summarized");
 		expect(session.getPruneSummary(msgId)).toBe("The original request established the API boundary.");
 		expect(session.buildContextEntries().map((entry) => entry.id)).not.toContain(msgId);
 		expect(session.buildSessionContext().messages).toMatchObject([
 			{
-				role: "custom",
+				role: "user",
 				content:
 					"[Summary of previously summarized context block]\nThe original request established the API boundary.",
 			},
@@ -172,10 +179,11 @@ describe("SessionManager prune markers", () => {
 
 		const msgId = session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
 
-		session.appendPruneChange(msgId, "summarized", "summary");
+		session.appendContextChange(msgId, "summarized", "summary");
 		expect(session.getPruneState(msgId)).toBe("summarized");
 
-		session.appendPruneChange(msgId, "included");
+		session.appendContextChange(msgId, "included");
+		expect(session.getEntries().at(-1)).toMatchObject({ type: "context_edit_cancel", targetId: msgId });
 		expect(session.getPruneState(msgId)).toBeUndefined();
 		expect(session.getPruneSummary(msgId)).toBeUndefined();
 		expect(session.buildSessionContext().messages.map((m) => m.role)).toEqual(["user"]);
@@ -186,12 +194,12 @@ describe("SessionManager prune markers", () => {
 
 		const msgId = session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
 
-		session.appendPruneChange(msgId, "excluded");
-		session.appendPruneChange(msgId, "included");
-		session.appendPruneChange(msgId, "excluded");
+		session.appendContextChange(msgId, "excluded");
+		session.appendContextChange(msgId, "included");
+		session.appendContextChange(msgId, "excluded");
 		expect(session.getPruneState(msgId)).toBe("excluded");
 
-		session.appendPruneChange(msgId, "included");
+		session.appendContextChange(msgId, "included");
 		expect(session.getPruneState(msgId)).toBeUndefined();
 	});
 
@@ -202,7 +210,7 @@ describe("SessionManager prune markers", () => {
 		session.appendMessage(assistantMessage("hi", 2));
 		session.appendMessage({ role: "user", content: "followup", timestamp: 3 });
 
-		session.appendPruneChange(msg1, "excluded");
+		session.appendContextChange(msg1, "excluded");
 
 		const ctx = session.buildSessionContext();
 		expect(ctx.messages.map((m) => m.role)).toEqual(["assistant", "user"]);
@@ -214,18 +222,20 @@ describe("SessionManager prune markers", () => {
 		const msg1 = session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
 		session.appendMessage(assistantMessage("hi", 2));
 
-		session.appendPruneChange(msg1, "excluded");
+		session.appendContextChange(msg1, "excluded");
 		expect(session.buildSessionContext().messages.map((m) => m.role)).toEqual(["assistant"]);
 
-		session.appendPruneChange(msg1, "included");
+		session.appendContextChange(msg1, "included");
 		expect(session.buildSessionContext().messages.map((m) => m.role)).toEqual(["user", "assistant"]);
 	});
 
 	it("preserves global prune state when extracting a sibling branch", () => {
-		const session = SessionManager.inMemory();
-		const rootId = session.appendMessage({ role: "user", content: "SECRET", timestamp: 1 });
-		session.appendMessage({ role: "user", content: "first branch", timestamp: 2 });
-		session.appendPruneChange(rootId, "excluded");
+		const rootId = "root";
+		const session = SessionManager.inMemory(undefined, undefined, [
+			msg(rootId, null, "user", "SECRET"),
+			msg("first", rootId, "user", "first branch"),
+			legacyPrune("legacy", "first", rootId, "excluded"),
+		]);
 
 		session.branch(rootId);
 		const siblingLeafId = session.appendMessage({ role: "user", content: "sibling branch", timestamp: 3 });
@@ -237,10 +247,12 @@ describe("SessionManager prune markers", () => {
 	});
 
 	it("preserves a summarized block when extracting a sibling branch", () => {
-		const session = SessionManager.inMemory();
-		const rootId = session.appendMessage({ role: "user", content: "full original request", timestamp: 1 });
-		session.appendMessage({ role: "user", content: "first branch", timestamp: 2 });
-		session.appendPruneChange(rootId, "summarized", "Original request summary.");
+		const rootId = "root";
+		const session = SessionManager.inMemory(undefined, undefined, [
+			msg(rootId, null, "user", "full original request"),
+			msg("first", rootId, "user", "first branch"),
+			legacyPrune("legacy", "first", rootId, "summarized", "Original request summary."),
+		]);
 
 		session.branch(rootId);
 		const siblingLeafId = session.appendMessage({ role: "user", content: "sibling branch", timestamp: 3 });
@@ -258,7 +270,7 @@ describe("SessionManager prune markers", () => {
 		const session = SessionManager.inMemory();
 
 		const msg1 = session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
-		session.appendPruneChange(msg1, "excluded");
+		session.appendContextChange(msg1, "excluded");
 
 		const ctx = session.buildSessionContext();
 		expect(ctx.messages).toEqual([]);
@@ -267,7 +279,7 @@ describe("SessionManager prune markers", () => {
 	it("throws when pruning a non-existent entry", () => {
 		const session = SessionManager.inMemory();
 
-		expect(() => session.appendPruneChange("non-existent", "excluded")).toThrow("Entry non-existent not found");
+		expect(() => session.appendContextChange("non-existent", "excluded")).toThrow("Entry non-existent not found");
 	});
 });
 
@@ -278,7 +290,62 @@ describe("SessionManager prune persistence", () => {
 		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 	});
 
-	it("persists prune markers across reload", () => {
+	it("loads legacy markers without rewriting and retains legacy tool summaries", () => {
+		tempDir = join(tmpdir(), `legacy-prune-${Date.now()}-${Math.random()}`);
+		mkdirSync(tempDir, { recursive: true });
+		const call = fauxAssistantMessage([fauxToolCall("read", { path: "large.txt" })], { stopReason: "toolUse" });
+		const toolCall = call.content.find((part) => part.type === "toolCall");
+		if (!toolCall) throw new Error("expected tool call");
+		const entries = [
+			{
+				type: "session",
+				version: CURRENT_SESSION_VERSION,
+				id: "legacy-session",
+				timestamp: "2025-01-01T00:00:00Z",
+				cwd: tempDir,
+			},
+			{ type: "message", id: "call", parentId: null, timestamp: "2025-01-01T00:00:00Z", message: call },
+			{
+				type: "message",
+				id: "result",
+				parentId: "call",
+				timestamp: "2025-01-01T00:00:00Z",
+				message: {
+					role: "toolResult",
+					toolCallId: toolCall.id,
+					toolName: "read",
+					content: [{ type: "text", text: "ORIGINAL_LARGE_OUTPUT" }],
+					isError: false,
+					timestamp: 1,
+				},
+			},
+			legacyPrune("summary", "result", "call", "summarized", "The file was inspected."),
+			legacyPrune("tail", "summary", "result", "summarized"),
+		];
+		const file = join(tempDir, "legacy.jsonl");
+		const original = `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+		writeFileSync(file, original);
+		const session = SessionManager.open(file);
+		expect(readFileSync(file, "utf8")).toBe(original);
+		expect(session.buildSessionContext().messages).toMatchObject([
+			{ role: "custom", content: "[Summary of previously summarized context block]\nThe file was inspected." },
+		]);
+		expect(
+			session.buildSessionProjection().entries.find((entry) => entry.sourceEntry.id === "result")?.messages,
+		).toEqual([]);
+		session.appendContextChange("call", "included");
+		session.appendContextChange("result", "included");
+		expect(readFileSync(file, "utf8").startsWith(original)).toBe(true);
+		const reopened = SessionManager.open(file);
+		expect(reopened.buildSessionContext().messages.map((message) => message.role)).toEqual([
+			"assistant",
+			"toolResult",
+		]);
+		expect(reopened.getEntries().filter((entry) => entry.type === "prune")).toHaveLength(2);
+		expect(reopened.getEntries().filter((entry) => entry.type === "context_edit_cancel")).toHaveLength(2);
+	});
+
+	it("persists context edits across reload", () => {
 		tempDir = join(tmpdir(), `prune-test-${Date.now()}-${Math.random()}`);
 		mkdirSync(tempDir, { recursive: true });
 
@@ -286,7 +353,7 @@ describe("SessionManager prune persistence", () => {
 		const msg1 = session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
 		session.appendMessage(assistantMessage("hi", 2));
 		const msg3 = session.appendMessage({ role: "user", content: "followup", timestamp: 3 });
-		session.appendPruneChange(msg1, "summarized", "hello summary");
+		session.appendContextChange(msg1, "summarized", "hello summary");
 
 		const file = session.getSessionFile();
 		expect(file).toBeDefined();
@@ -298,7 +365,7 @@ describe("SessionManager prune persistence", () => {
 
 		const ctx = reopened.buildSessionContext();
 		expect(ctx.messages).toMatchObject([
-			{ role: "custom", content: "[Summary of previously summarized context block]\nhello summary" },
+			{ role: "user", content: "[Summary of previously summarized context block]\nhello summary" },
 			{ role: "assistant" },
 			{ role: "user", content: "followup" },
 		]);
@@ -329,13 +396,18 @@ describe("SessionManager prune persistence", () => {
 			.filter((entry) => entry.type === "message" && entry.message.role === "toolResult")
 			.map((entry) => entry.id);
 		session.appendMessage(assistantMessage("follow-up", 3));
-		session.appendPruneChange(callId, "summarized", "The files were inspected.");
-		for (const resultId of resultIds) session.appendPruneChange(resultId, "summarized");
+		session.appendContextChange(callId, "summarized", "The files were inspected.");
+		for (const resultId of resultIds) session.appendContextChange(resultId, "summarized");
 
 		const reopened = SessionManager.open(session.getSessionFile()!);
 		const projected = reopened.buildSessionProjection();
 		expect(projected.messages).toMatchObject([
-			{ role: "custom", content: "[Summary of previously summarized context block]\nThe files were inspected." },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "[Summary of previously summarized context block]\nThe files were inspected." },
+				],
+			},
 			{ role: "assistant" },
 		]);
 		expect(

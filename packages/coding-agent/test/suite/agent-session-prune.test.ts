@@ -36,6 +36,7 @@ describe("AgentSession setPruneState", () => {
 		// Context rebuild drops the pruned user message; the seeded system message remains.
 		expect(harness.session.messages.map((m) => m.role)).toEqual(["system", "assistant"]);
 		expect(harness.sessionManager.getPruneState(id)).toBe("excluded");
+		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "prune")).toHaveLength(0);
 	});
 
 	it("replaces an atomic block with a persisted summary", async () => {
@@ -53,11 +54,65 @@ describe("AgentSession setPruneState", () => {
 			// (upstream v0.87.1 moved the system prompt into `state.messages`).
 			{ role: "system" },
 			{
-				role: "custom",
+				role: "user",
 				content: "[Summary of previously summarized context block]\nThe user started the greeting task.",
 			},
 			{ role: "assistant" },
 		]);
+	});
+
+	it("prevalidates every summary target before changing session or live context", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		harness.setResponses([fauxAssistantMessage("hello back")]);
+		await harness.session.prompt("hello");
+
+		const activeId = userEntryId(harness);
+		const activeLeaf = harness.sessionManager.getLeafId();
+		harness.sessionManager.branch(activeId);
+		const siblingId = harness.sessionManager.appendMessage({
+			role: "user",
+			content: "sibling",
+			timestamp: Date.now(),
+		});
+		harness.sessionManager.branch(activeLeaf!);
+		const entriesBefore = harness.sessionManager.getEntries();
+		const messagesBefore = harness.session.messages;
+		const countBefore = harness.sessionManager.getEntryCount();
+
+		expect(() => harness.session.setBlockSummary([activeId, siblingId], "replacement")).toThrow(
+			"not on the active branch",
+		);
+		expect(harness.sessionManager.getEntries()).toEqual(entriesBefore);
+		expect(harness.sessionManager.getEntryCount()).toBe(countBefore);
+		expect(harness.sessionManager.getLeafId()).toBe(activeLeaf);
+		expect(harness.session.messages).toEqual(messagesBefore);
+	});
+
+	it("prevalidates every include/exclude target before changing session or live context", async () => {
+		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
+		harness.setResponses([fauxAssistantMessage("hello back")]);
+		await harness.session.prompt("hello");
+
+		const activeId = userEntryId(harness);
+		const activeLeaf = harness.sessionManager.getLeafId();
+		harness.sessionManager.branch(activeId);
+		const siblingId = harness.sessionManager.appendMessage({
+			role: "user",
+			content: "sibling",
+			timestamp: Date.now(),
+		});
+		harness.sessionManager.branch(activeLeaf!);
+		const entriesBefore = harness.sessionManager.getEntries();
+		const messagesBefore = harness.session.messages;
+		const countBefore = harness.sessionManager.getEntryCount();
+
+		for (const state of ["included", "excluded"] as const) {
+			expect(() => harness.session.setPruneState([activeId, siblingId], state)).toThrow("not on the active branch");
+			expect(harness.sessionManager.getEntries()).toEqual(entriesBefore);
+			expect(harness.sessionManager.getEntryCount()).toBe(countBefore);
+			expect(harness.sessionManager.getLeafId()).toBe(activeLeaf);
+			expect(harness.session.messages).toEqual(messagesBefore);
+		}
 	});
 
 	it("restores entries on unprune", async () => {
@@ -138,6 +193,7 @@ describe("AgentSession setPruneState", () => {
 
 		expect(harness.sessionManager.getPruneState(user)).toBe("summarized");
 		expect(harness.sessionManager.getPruneSummary(user)).toBe("The active model summarized the greeting task.");
+		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "prune")).toHaveLength(0);
 	});
 
 	it("summarizes a tool exchange without leaking the original call or large results into later requests", async () => {
@@ -200,7 +256,7 @@ describe("AgentSession setPruneState", () => {
 		for (const requestMessages of [summarizeTurnNextRequest, nextRequestMessages]) {
 			const summaryMessages = requestMessages.filter(
 				(message) =>
-					message.role === "user" &&
+					(message.role === "user" || message.role === "assistant") &&
 					Array.isArray(message.content) &&
 					message.content.some(
 						(part) =>
@@ -208,6 +264,7 @@ describe("AgentSession setPruneState", () => {
 					),
 			);
 			expect(summaryMessages).toHaveLength(1);
+			expect(summaryMessages[0].role).toBe("assistant");
 			expect(JSON.stringify(summaryMessages)).toContain("Both reports completed successfully.");
 			expect(
 				requestMessages.some(
@@ -265,7 +322,7 @@ describe("AgentSession setPruneState", () => {
 		).toBe(true);
 	});
 
-	it("manual compaction summarizes pruned context, including prune state inherited from a sibling", async () => {
+	it("manual compaction summarizes context edits without exposing hidden tool data", async () => {
 		const harness = track(
 			await createHarness({
 				models: [{ id: "test-model", contextWindow: 100000 }],
@@ -288,13 +345,11 @@ describe("AgentSession setPruneState", () => {
 			isError: false,
 			timestamp: Date.now(),
 		});
-		const savedSummary = "A sibling inspected the configuration and confirmed the required setting.";
-		harness.sessionManager.appendPruneChange(callId, "summarized", savedSummary);
-		harness.sessionManager.appendPruneChange(resultId, "excluded");
-		harness.sessionManager.branch(callId);
+		const savedSummary = "The tool output confirmed the required configuration setting.";
+		harness.session.setBlockSummary([callId, resultId], savedSummary);
 		harness.sessionManager.appendMessage({
 			role: "user",
-			content: "Continue from the sibling branch",
+			content: "Continue from the summarized tool block",
 			timestamp: Date.now(),
 		});
 		harness.sessionManager.appendMessage(fauxAssistantMessage("I can continue."));
@@ -346,7 +401,7 @@ describe("AgentSession setPruneState", () => {
 		expect(harness.sessionManager.getPruneSummary(user)).toBe("The user opened the greeting task.");
 		expect(harness.session.messages).toContainEqual(
 			expect.objectContaining({
-				role: "custom",
+				role: "user",
 				content: "[Summary of previously summarized context block]\nThe user opened the greeting task.",
 			}),
 		);

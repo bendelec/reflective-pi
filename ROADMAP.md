@@ -42,8 +42,13 @@ The next implementation target is described below.
   and restore summaries, but cannot yet request one.
 - **Context refresh after a curation turn** ensures that the next request and the
   compaction check use the pruned context rather than a stale pre-prune estimate.
-- **Fork and clone handling** preserves resolved global curation state for retained
-  entries, including state inherited from sibling branches.
+- **Branch-scoped curation** uses path-local `context_edit` and cancellation entries.
+  Descendants inherit changes; siblings are unaffected. Legacy `prune` markers remain
+  a session-global baseline and are read for compatibility; existing files are not
+  automatically rewritten.
+- **Fork and clone handling** preserves path-local curation and the legacy global
+  baseline for retained targets. `/fork` and `/clone` extract a selected path;
+  CLI `--fork` copies the full session tree.
 
 ### Supporting fixes
 
@@ -80,9 +85,6 @@ an earlier phase changes the evidence.
 - Attribute usable per-block capacity more reliably in `list_context` and
   `/prune`; server-reported context use cannot simply be divided among blocks.
 - Let users request summaries from `/prune`, not only inspect and restore them.
-- Make curation branch-scoped by recording a branch identity on prune markers in
-  `SessionManager`. The harness-v2 lanes that were going to provide it are deleted (D9), so this
-  is fork work, not an upstream dependency.
 - Explore structured, selectable summaries for cases where manual `/compact` is
   used; do not reintroduce automatic summarization as a fallback.
 
@@ -92,12 +94,16 @@ and more hints have not made initiative reliable.
 
 ## Current limitations and decisions
 
-- Curation markers are append-only and latest-wins, following the durable label
-  pattern. This keeps persistence crash-safe and makes restoration additive.
-- `PruneState` is a three-state value rather than a Boolean so exclusion and
-  summary replacement share one reversible mechanism.
-- Curation is **session-global** in the MVP. Navigating to another branch does not
-  make prior exclusions branch-local.
+- Curation changes are append-only. New writes use standard `context_edit` entries
+  for exclusion or replacement, and a fork-only `context_edit_cancel` for restoration.
+  `PruneState` remains a three-state presentation model; legacy `prune` entries are
+  read as a session-global baseline, while new operations are branch-local by
+  `id`/`parentId` ancestry. Cancellation restores raw originals rather than falling
+  back to the legacy baseline. Compaction retention still bounds what restoration
+  can recover.
+- Upstream v0.87.1 accepts unknown entry types but ignores cancellation entries;
+  replacement support is also narrower than rxpi's. Session compatibility is
+  therefore soft, not full behavioral compatibility.
 - Per-turn context-status insertion is intentionally out of scope. Threshold-based
   messages provide awareness without adding noise or forcing terminal responses
   into extra turns.

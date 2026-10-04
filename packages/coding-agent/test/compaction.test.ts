@@ -1,5 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Usage } from "@earendil-works/pi-ai/compat";
+import type { AssistantMessage, Usage, UserMessage } from "@earendil-works/pi-ai/compat";
 import { getModel } from "@earendil-works/pi-ai/compat";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -10,6 +10,8 @@ import {
 	compact,
 	DEFAULT_COMPACTION_SETTINGS,
 	estimateContextTokens,
+	estimateProjectedContextTokens,
+	estimateTokens,
 	findCutPoint,
 	getLastAssistantUsage,
 	prepareCompaction,
@@ -17,13 +19,18 @@ import {
 } from "../src/core/compaction/index.ts";
 import {
 	buildSessionContext,
+	buildSessionProjection,
 	type CompactionEntry,
+	type ContextEditCancelEntry,
+	CURRENT_SESSION_VERSION,
 	type CustomMessageEntry,
 	type ModelChangeEntry,
 	migrateSessionEntries,
-	type PruneState,
+	type PruneEntry,
 	parseSessionEntries,
 	type SessionEntry,
+	type SessionHeader,
+	SessionManager,
 	type SessionMessageEntry,
 	type ThinkingLevelChangeEntry,
 } from "../src/core/session-manager.ts";
@@ -51,7 +58,7 @@ function createMockUsage(input: number, output: number, cacheRead = 0, cacheWrit
 	};
 }
 
-function createUserMessage(text: string): AgentMessage {
+function createUserMessage(text: string): UserMessage {
 	return { role: "user", content: text, timestamp: Date.now() };
 }
 
@@ -74,6 +81,22 @@ let lastId: string | null = null;
 function resetEntryCounter() {
 	entryCounter = 0;
 	lastId = null;
+}
+
+function createLegacyPruneSession(entries: SessionEntry[], prune: PruneEntry): SessionManager {
+	const header: SessionHeader = {
+		type: "session",
+		version: CURRENT_SESSION_VERSION,
+		id: "legacy-prune-test-session",
+		timestamp: new Date().toISOString(),
+		cwd: process.cwd(),
+	};
+	const lastEntry = entries[entries.length - 1];
+	return SessionManager.inMemory(process.cwd(), undefined, [
+		header,
+		...entries,
+		{ ...prune, parentId: lastEntry?.id ?? null },
+	]);
 }
 
 // Reset counter before each test to get predictable IDs
@@ -269,6 +292,104 @@ describe("estimateContextTokens", () => {
 		expect(estimate.lastUsageIndex).toBe(1);
 		expect(estimate.trailingTokens).toBeGreaterThan(0);
 		expect(estimate.tokens).toBe(150 + estimate.trailingTokens);
+	});
+
+	it.each(["excluded", "summarized", "included"] as const)(
+		"invalidates usage after a sibling legacy %s marker, but trusts later usage",
+		(state) => {
+			const root = createMessageEntry(createUserMessage("x".repeat(40000)));
+			const assistant = createMessageEntry(createAssistantMessage("answer", createMockUsage(10000, 10)));
+			const marker: PruneEntry = {
+				type: "prune",
+				id: "sibling-legacy",
+				parentId: root.id,
+				timestamp: root.timestamp,
+				targetId: root.id,
+				state,
+				...(state === "summarized" ? { summary: "small summary" } : {}),
+			};
+			const session = SessionManager.inMemory(undefined, undefined, [root, assistant, marker]);
+			session.branch(assistant.id);
+			const projection = session.buildSessionProjection();
+			const estimate = estimateProjectedContextTokens(projection, session.getBranch(), session.getEntries());
+			expect(estimate.usageTokens).toBe(0);
+			expect(estimate.tokens).toBe(projection.messages.reduce((sum, message) => sum + estimateTokens(message), 0));
+			const preparation = prepareCompaction(
+				session.getBranch(),
+				{ ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 0 },
+				session.getLegacyPruneChanges(),
+				session.getEntries(),
+			);
+			if (state !== "excluded") expect(preparation?.tokensBefore).toBe(estimate.tokens);
+
+			session.appendMessage(createAssistantMessage("fresh answer", createMockUsage(30, 10)));
+			expect(
+				estimateProjectedContextTokens(session.buildSessionProjection(), session.getBranch(), session.getEntries())
+					.usageTokens,
+			).toBe(40);
+		},
+	);
+
+	it("ignores legacy changes whose targets are outside the selected context or overridden locally", () => {
+		const root = createMessageEntry(createUserMessage("root"));
+		const sibling = createMessageEntry(createUserMessage("sibling"));
+		const assistant = {
+			...createMessageEntry(createAssistantMessage("answer", createMockUsage(10000, 10))),
+			parentId: root.id,
+		};
+		const marker: PruneEntry = {
+			type: "prune",
+			id: "legacy",
+			parentId: sibling.id,
+			timestamp: root.timestamp,
+			targetId: sibling.id,
+			state: "excluded",
+		};
+		const session = SessionManager.inMemory(undefined, undefined, [root, sibling, assistant, marker]);
+		session.branch(assistant.id);
+		expect(
+			estimateProjectedContextTokens(session.buildSessionProjection(), session.getBranch(), session.getEntries())
+				.usageTokens,
+		).toBe(10010);
+		const cancel: ContextEditCancelEntry = {
+			type: "context_edit_cancel",
+			id: "cancel",
+			parentId: root.id,
+			timestamp: root.timestamp,
+			targetId: root.id,
+		};
+		const restoredAssistant = { ...assistant, parentId: cancel.id };
+		const overridden = SessionManager.inMemory(undefined, undefined, [
+			root,
+			cancel,
+			restoredAssistant,
+			{ ...marker, targetId: root.id },
+		]);
+		overridden.branch(assistant.id);
+		expect(
+			estimateProjectedContextTokens(
+				overridden.buildSessionProjection(),
+				overridden.getBranch(),
+				overridden.getEntries(),
+			).usageTokens,
+		).toBe(10010);
+	});
+
+	it("does not trust assistant usage after a context edit is cancelled", () => {
+		const user = createMessageEntry(createUserMessage("restored user input"));
+		const assistant = createMessageEntry(createAssistantMessage("short answer", createMockUsage(9000, 100)));
+		const cancellation = {
+			type: "context_edit_cancel",
+			id: "cancel-context-edit",
+			parentId: assistant.id,
+			timestamp: new Date().toISOString(),
+			targetId: user.id,
+		} satisfies ContextEditCancelEntry;
+		const branch: SessionEntry[] = [user, assistant, cancellation];
+		const estimate = estimateProjectedContextTokens(buildSessionProjection(branch), branch);
+
+		expect(estimate.usageTokens).toBe(0);
+		expect(estimate.tokens).toBe(estimateTokens(user.message) + estimateTokens(assistant.message));
 	});
 });
 
@@ -557,20 +678,95 @@ describe("prepareCompaction", () => {
 });
 
 describe("prepareCompaction with previous compaction", () => {
+	it.each(["modern", "legacy"] as const)("uses the projected %s checkpoint summary when re-compacting", (kind) => {
+		const session = SessionManager.inMemory();
+		const retained = session.appendMessage(createUserMessage("history to summarize"));
+		const checkpoint = session.appendCompaction("RAW_CHECKPOINT_SECRET", retained, 10010);
+		if (kind === "modern") session.appendContextChange(checkpoint, "summarized", "SAFE_REPLACEMENT");
+		const recent = session.appendMessage(createUserMessage("recent message"));
+		const markers: PruneEntry[] =
+			kind === "legacy"
+				? [
+						{
+							type: "prune",
+							id: "legacy-checkpoint",
+							parentId: recent,
+							timestamp: new Date().toISOString(),
+							targetId: checkpoint,
+							state: "summarized",
+							summary: "SAFE_REPLACEMENT",
+						},
+					]
+				: [];
+		const loaded = SessionManager.inMemory(undefined, undefined, [...session.getEntries(), ...markers]);
+		const preparation = prepareCompaction(
+			loaded.getBranch(),
+			{ ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 0 },
+			loaded.getLegacyPruneChanges(),
+			loaded.getEntries(),
+		);
+		expect(preparation).toBeDefined();
+		expect(preparation?.previousSummary).toContain("SAFE_REPLACEMENT");
+		expect(JSON.stringify(preparation)).not.toContain("RAW_CHECKPOINT_SECRET");
+	});
+
 	it("does not summarize excluded entries", () => {
 		const excluded = createMessageEntry(createUserMessage("SECRET: do not summarize"));
 		const visible = createMessageEntry(createUserMessage("visible history"));
 		const recent = createMessageEntry(createUserMessage("visible recent"));
-		const pruneStateById = new Map<string, PruneState>([[excluded.id, "excluded"]]);
+		const legacyPrune = {
+			type: "prune",
+			id: "legacy-prune-excluded",
+			parentId: excluded.id,
+			timestamp: new Date().toISOString(),
+			targetId: excluded.id,
+			state: "excluded",
+		} satisfies PruneEntry;
 
+		const session = createLegacyPruneSession([excluded, visible, recent], legacyPrune);
+		expect(session.getLegacyPruneChanges().get(excluded.id)).toBeDefined();
+		const projection = buildSessionProjection(
+			session.getBranch(),
+			undefined,
+			undefined,
+			session.getLegacyPruneChanges(),
+		);
+		expect(projection.messages).not.toContain(excluded.message);
 		const preparation = prepareCompaction(
-			[excluded, visible, recent],
+			session.getBranch(),
 			{ enabled: true, reserveTokens: 0, keepRecentTokens: 0 },
-			pruneStateById,
+			session.getLegacyPruneChanges(),
 		);
 
 		expect(preparation).toBeDefined();
 		expect(extractText(preparation!.messagesToSummarize)).toBe("visible history");
+	});
+
+	it("projects legacy prune summaries as custom context summary messages", () => {
+		const summarized = createMessageEntry(createUserMessage("legacy hidden block"));
+		const visible = createMessageEntry(createUserMessage("visible history"));
+		const legacyPrune = {
+			type: "prune",
+			id: "legacy-prune-summary",
+			parentId: summarized.id,
+			timestamp: new Date().toISOString(),
+			targetId: summarized.id,
+			state: "summarized",
+			summary: "A prior run resolved the legacy issue.",
+		} satisfies PruneEntry;
+
+		const session = createLegacyPruneSession([summarized, visible], legacyPrune);
+		const preparation = prepareCompaction(
+			session.getBranch(),
+			{ enabled: true, reserveTokens: 0, keepRecentTokens: 0 },
+			session.getLegacyPruneChanges(),
+		);
+
+		expect(preparation).toBeDefined();
+		expect(preparation?.messagesToSummarize[0]).toMatchObject({
+			role: "custom",
+			content: "[Summary of previously summarized context block]\nA prior run resolved the legacy issue.",
+		});
 	});
 
 	it("should skip repeated compactions when kept messages still fit", () => {

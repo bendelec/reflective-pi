@@ -45,7 +45,7 @@ Compaction can fail if the provider is unavailable or cannot accept the summariz
 
 See [Compaction Reference](compaction.md) for thresholds, retained boundaries, branch-summary behavior, and extension hooks.
 
-Run `/prune` to review the blocks in the active context and stage exclude or restore changes for individual blocks. Curation is recorded as append-only markers, so the transcript keeps the original entries and a restore reveals a block again. See [Reflective context management](reflective-context.md).
+Run `/prune` to review the blocks in the active context and stage exclude or restore changes for individual blocks. New curation is recorded as append-only `context_edit` and cancellation entries, so the transcript keeps the original entries. These operations follow the active branch ancestry; siblings are unaffected. Existing legacy curation remains readable, and restoring a block reveals its raw original (subject to compaction retention). See [Reflective context management](reflective-context.md) and [Session Format](session-format.md#contexteditentry).
 
 ## Control session storage
 

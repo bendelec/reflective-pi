@@ -1,7 +1,7 @@
 ---
 description: Implement one focused fork backlog item with tests
 argument-hint: "<task>"
-model: qwen-token-plan/deepseek-v4-pro-0813
+model: openai-codex/gpt-6-luna
 ---
 Implement this focused task in the current worktree:
 

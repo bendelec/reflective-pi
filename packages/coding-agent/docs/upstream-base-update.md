@@ -1,7 +1,8 @@
 # Upstream base update — decision record
 
-Status: agreed direction, not yet executed. Scope: **`reflective-context` (phase 1) only**.
-Phase-2 cleanup work is deliberately out of scope until phase 1 is merged, stable and pushed.
+Status: **completed**; the decision and execution record below is historical. Scope:
+**`reflective-context` (phase 1) only**. Phase-2 cleanup work was out of scope for this
+base update.
 
 ## Decision
 
@@ -182,7 +183,7 @@ which upstream does not implement yet), the virtual-model rework (the fork alrea
 divergent implementation to diff against), durable client/server, and all phase-2 cleanup
 interaction — including how fork-specific `usage` kinds must be filtered once they exist.
 
-## Merge progress (in progress, 2026-10-03)
+## Merge progress (historical snapshot, 2026-10-03)
 
 Branch `integration/upstream-v0.87.1`, merge of `v0.87.1` started with `--no-ff --no-commit`.
 Backup branch: `backup/reflective-context-pre-base-update` (at `d7f4ce20f`). Recover with
@@ -270,15 +271,15 @@ Test adaptations for fork deviations, each commented in place:
   so "seed curation only into default loadouts" is not available: it would strip curation from
   every real session, including the TUI.
 
-Remaining:
+Remaining at the time of this 2026-10-03 snapshot (historical; not current task status):
 
 1. Decide the D6 follow-up: whether `/tools` and extension `setActiveTools` should preserve the
    curation tools.
 2. Delete the surface approved under D9, starting with harness v2, after a dependency sweep: the
    `packages/agent/src/index.ts` barrel re-exports it, and the package export maps,
    `scripts/check-entry-graphs.mjs` and `check-browser-smoke` reference those entries.
-3. Put branch-scoped pruning back on the roadmap. It was deferred pending harness v2, which D9
-   deletes, so it must be implemented on `SessionManager` prune entries instead.
+3. At that point, branch-scoped pruning had been deferred pending harness v2, which D9 deleted.
+   The implementation outcome below records the later resolution on `SessionManager` ancestry.
 4. D9 deletions are complete and verified green after each stage: stage 1, the experimental tree
    (96 files / -14,877 lines, `a2faa2d38`); stages 2-4, harness v2 + pico3 + `packages/agent/src
    /node.ts`, `session-backends`, and `client`/`protocol`/`server`, which had to land together
@@ -286,9 +287,8 @@ Remaining:
    (311 files / -68,650 lines, `d572d4640`); stage 5, `packages/durable` (27 files), the hygiene
    items (`pi-agent-old` tsconfig map, `packages/mom` biome glob, `core/index.ts`,
    `utils/deprecation.ts`) and the docs describing deleted code (tracked files 1553 -> 1477).
-   `packages/agent/src` is now seven files. Branch-scoped pruning moves onto `SessionManager`
-   prune markers as a result; `docs/prune.md`, `docs/reflective-context.md` and `ROADMAP.md` are
-   updated to say so.
+   `packages/agent/src` is now seven files. The later branch-scoped implementation is recorded
+   in the migration outcome below.
 5. D10: note the absent managed self-update in `[Unreleased]` and trim docs that still describe it.
 6. Push `reflective-context` and the `main` marker after the validation period.
 
@@ -337,6 +337,54 @@ Remaining:
   on every deploy. Refreshing is now a deliberate act: `npm run generate:models`, then `npm run
   check` and `./test.sh`, fix the tests pinned to renamed models, and commit the data and test
   changes together. Biome is unaffected: its `files.includes` covers only `**/*.ts`.
+
+## Migration implementation outcome
+
+The phase-one migration completed. The earlier D5 statement that upstream's post-restore view
+was a safe strict subset is an initial assessment, not the final compatibility guarantee: because
+upstream ignores cancellation entries and role-filters replacements, do not infer general safety
+for arbitrary rxpi sessions. **D5 is implemented** with standard `context_edit` entries
+for exclusion and summary replacement, plus the fork-only `context_edit_cancel` for restore.
+The cancel entry is deliberately not a replacement enum: v0.87.1 accepts unknown entry types
+but ignores them, so an upstream projection can continue to omit a target restored by rxpi.
+Upstream's replacement role filter is also narrower than rxpi's; replacements for fork-specific
+`contextStatus`, compaction-summary, branch-summary, and bash roles may be ignored. Compatibility
+is soft, not a claim that all rxpi sessions are behaviorally safe or equivalent upstream. In
+particular, unknown `contextStatus` messages must not be assumed safe for every upstream model API.
+
+The implemented path model is branch-local by `id`/`parentId` ancestry, with descendants
+inheriting edits and sibling branches unaffected. Existing legacy `prune` entries remain a
+session-global latest-wins baseline. Active-path edits/cancels override that baseline, and a
+cancel restores the raw original rather than returning to the baseline. Compaction retention
+is applied first, so a cancel cannot recover entries beyond the retained range. Existing files
+are not automatically rewritten. A single resolved state map feeds projection; there is no
+second prune-state filter layered over the canonical projection. `SessionManager` writes via
+`appendContextChange(targetId, state, summary?)` or the prevalidated batch API
+`appendContextChanges(...)`; `PruneState` remains the UI/tool presentation model, while the
+legacy prune entry is read-only compatibility. `/fork` and `/clone` extract
+one path, retaining its edits/cancels and the legacy global baseline for retained targets.
+CLI `--fork` copies the full tree.
+
+Verification includes `npm run check`, the isolated non-e2e `./test.sh`, and a source-level
+compatibility harness using `session-manager.ts` from the exact `v0.87.1` tag with local support
+modules. The harness verified both loading directions for ordinary messages and standard
+edits: upstream honours rxpi summaries and omitted tool tails, ignores cancellation entries
+without load/traversal/clone/extraction failure, and does not rewrite the loaded file. rxpi
+loads upstream-native edits and restores the originals locally. This does not verify arbitrary
+fork-specific message roles against upstream provider APIs.
+
+Independent review found and corrected three additional regressions: re-compaction now uses
+the projected checkpoint summary rather than raw discarded text; invalid curation batches
+write no markers and leave live context unchanged; and global legacy markers on sibling
+branches invalidate older usage estimates, including legacy restoration markers. Fresh usage
+after those changes remains usable. Faux-provider regressions cover the resulting compaction
+requests, batch failures, a legacy tool block's cancel/re-summarize/cancel cycle, fresh-usage
+silent overflow, and explicit overflow recovery after curation. Path extraction also preserves
+the latest legacy restoration record: dropping it would let the extracted session trust usage
+captured before restored content returned. Extraction/reload regressions cover that provenance.
+
+The summarize-leakage hotfix `87588a654` was separate from this migration. CPU/render
+performance remains open. The footer cherry-pick survived the base-update merge.
 
 ## Branch topology (post-deviation)
 

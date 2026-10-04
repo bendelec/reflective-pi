@@ -37,7 +37,8 @@ explains the evidence and its limits.
   a warning with six incremental prunes and avoided compaction. This was
   effective pressure-driven behavior, not proactive curation.
 - Curation markers persist in the session and are reversible through `/prune`.
-  Tool exchanges are atomic blocks. Curation is session-global, not branch-local.
+  Tool exchanges are atomic blocks. New `context_edit` and cancellation entries
+  are branch-local by ancestry; legacy `prune` markers retain their global semantics.
 - Model-visible post-prune accounting feedback was removed. Re-reading a
   replaceable file does not prove a bad selection; the
   [research notes](../../../evaluations/reflective-context/phase-1/research-notes.md#replaceability-and-re-reading)

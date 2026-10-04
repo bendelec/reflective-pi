@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
 	type AssistantMessage,
+	contentText,
 	getCurrentSystemMessage,
 	type ImageContent,
 	type Message,
@@ -139,21 +140,10 @@ export interface LabelEntry extends SessionEntryBase {
 	label: string | undefined;
 }
 
-/**
- * Per-message context-inclusion state. Latest-wins; resolved in _buildIndex.
- *
- * "excluded" removes the message from context (pruned). "included" is the
- * default (absence from the resolved map). "summarized" replaces an atomic
- * context block with its persisted summary.
- *
- * NOTE: prune markers are currently GLOBAL (not branch-scoped). This is a
- * temporary limitation. When the session layer migrates to harness-v2 lanes,
- * prune markers will gain a branchId and become per-lane. Do not build
- * branch-specific behavior on this.
- */
+/** Presentation state for curation tools and the selector; not a persisted action enum. */
 export type PruneState = "included" | "excluded" | "summarized";
 
-/** Entry recording a context-inclusion marker on a target message entry. */
+/** Legacy rxpi marker. Read with its original session-global semantics; never newly authored. */
 export interface PruneEntry extends SessionEntryBase {
 	type: "prune";
 	targetId: string;
@@ -201,7 +191,19 @@ export interface ContextEditEntry extends SessionEntryBase {
 	targetId: string;
 	/** Null omits the target from model context. A value replaces only its content. */
 	replacement: { content: ContextEditableContent } | null;
+	/** Fork metadata: marks every entry of an atomic summarized block, including omitted tails. */
+	curation?: "summary";
 }
+
+/** Branch-local restoration of original content. Unknown and inert in upstream v0.87.1. */
+export interface ContextEditCancelEntry extends SessionEntryBase {
+	type: "context_edit_cancel";
+	targetId: string;
+}
+
+export const CONTEXT_BLOCK_SUMMARY_PREFIX = "[Summary of previously summarized context block]\n";
+
+type ResolvedContextChange = ContextEditEntry | PruneEntry;
 
 /** Session entry - has id/parentId for tree structure (returned by "read" methods in SessionManager) */
 export type SessionEntry =
@@ -214,6 +216,7 @@ export type SessionEntry =
 	| CustomEntry
 	| CustomMessageEntry
 	| ContextEditEntry
+	| ContextEditCancelEntry
 	| LabelEntry
 	| PruneEntry
 	| SessionInfoEntry;
@@ -555,74 +558,93 @@ export function buildContextEntries(
  * If leafId is provided, walks from that entry to root.
  * Handles compaction and branch summaries along the path.
  */
-function projectContextEntry(entry: SessionEntry, edit: ContextEditEntry | undefined): AgentMessage[] {
+function projectContextEntry(entry: SessionEntry, change: ResolvedContextChange | undefined): AgentMessage[] {
 	const messages = sessionEntryToContextMessages(entry);
-	if (!edit) return messages;
-	const replacement = edit.replacement;
+	if (!change) return messages;
+	if (change.type === "prune") {
+		if (change.state === "included") return messages;
+		if (change.state === "excluded" || !change.summary) return [];
+		return [
+			createCustomMessage(
+				"context_summary",
+				CONTEXT_BLOCK_SUMMARY_PREFIX + change.summary,
+				false,
+				undefined,
+				entry.timestamp,
+			),
+		];
+	}
+	const replacement = change.replacement;
 	if (replacement === null) return [];
 
-	return messages.map((message) => {
-		if (
-			message.role !== "user" &&
-			message.role !== "assistant" &&
-			message.role !== "toolResult" &&
-			message.role !== "custom"
-		) {
-			return message;
+	return messages.map((message): AgentMessage => {
+		switch (message.role) {
+			case "assistant":
+			case "toolResult": {
+				const content =
+					typeof replacement.content === "string"
+						? [{ type: "text" as const, text: replacement.content }]
+						: replacement.content;
+				return { ...message, content } as AgentMessage;
+			}
+			case "user":
+			case "custom":
+				return { ...message, content: replacement.content } as AgentMessage;
+			case "contextStatus":
+				return { ...message, content: contentText(replacement.content) };
+			case "compactionSummary":
+			case "branchSummary":
+				return { ...message, summary: contentText(replacement.content) };
+			case "bashExecution":
+				return createCustomMessage(
+					"context_summary",
+					contentText(replacement.content),
+					false,
+					undefined,
+					entry.timestamp,
+				);
+			case "system":
+				return entry.type === "message" && change.curation === "summary"
+					? createCustomMessage(
+							"context_summary",
+							contentText(replacement.content),
+							false,
+							undefined,
+							entry.timestamp,
+						)
+					: message;
 		}
-		const content =
-			(message.role === "assistant" || message.role === "toolResult") && typeof replacement.content === "string"
-				? [{ type: "text" as const, text: replacement.content }]
-				: replacement.content;
-		return { ...message, content } as AgentMessage;
+		// Imported sessions may contain roles unknown to this version.
+		return message;
 	});
 }
 
-/**
- * Apply fork prune state on top of the canonical projection.
- *
- * Excluded blocks contribute nothing; summarized blocks contribute a summary message in place
- * of their original messages. Provenance is preserved so callers can still inspect the raw entry.
- */
-export function applyPruneState(
-	projection: SessionProjection,
-	pruneStateById?: ReadonlyMap<string, PruneState>,
-	pruneSummaryById?: ReadonlyMap<string, string>,
-): SessionProjection {
-	if (!pruneStateById || pruneStateById.size === 0) return projection;
-	let changed = false;
-	const entries = projection.entries.map((projected): ProjectedSessionEntry => {
-		const state = pruneStateById.get(projected.sourceEntry.id);
-		if (state === "excluded") {
-			changed = true;
-			return { ...projected, messages: [] };
+/** Legacy global baseline, overridden by edit/cancel entries on the selected ancestry. */
+function resolveContextChanges(
+	entries: SessionEntry[],
+	path: SessionEntry[],
+	legacyPruneChanges?: ReadonlyMap<string, PruneEntry>,
+): Map<string, ResolvedContextChange> {
+	const changes = new Map<string, ResolvedContextChange>(legacyPruneChanges);
+	if (!legacyPruneChanges) {
+		for (const entry of entries) {
+			if (entry.type !== "prune") continue;
+			if (entry.state === "included") changes.delete(entry.targetId);
+			else changes.set(entry.targetId, entry);
 		}
-		if (state === "summarized") {
-			changed = true;
-			const summary = pruneSummaryById?.get(projected.sourceEntry.id);
-			if (!summary) return { ...projected, messages: [] };
-			return {
-				...projected,
-				messages: [
-					createCustomMessage(
-						"context_summary",
-						`[Summary of previously summarized context block]\n${summary}`,
-						false,
-						undefined,
-						projected.sourceEntry.timestamp,
-					),
-				],
-			};
-		}
-		return projected;
-	});
-	if (!changed) return projection;
-	return {
-		entries,
-		messages: entries.flatMap((entry) => entry.messages),
-		thinkingLevel: projection.thinkingLevel,
-		model: projection.model,
-	};
+	}
+	for (const entry of path) {
+		if (entry.type === "context_edit") changes.set(entry.targetId, entry);
+		else if (entry.type === "context_edit_cancel") changes.delete(entry.targetId);
+	}
+	return changes;
+}
+
+function contextChangeState(change: ResolvedContextChange | undefined): PruneState | undefined {
+	if (!change) return undefined;
+	if (change.type === "prune") return change.state === "included" ? undefined : change.state;
+	if (change.curation === "summary") return "summarized";
+	return change.replacement === null ? "excluded" : undefined;
 }
 
 /** Build provenance-preserving, compaction-aware model context. */
@@ -630,14 +652,12 @@ export function buildSessionProjection(
 	entries: SessionEntry[],
 	leafId?: string | null,
 	byId?: Map<string, SessionEntry>,
+	legacyPruneChanges?: ReadonlyMap<string, PruneEntry>,
 ): SessionProjection {
 	const path = buildSessionPath(entries, leafId, byId);
 	const { thinkingLevel, model } = getSessionContextSettings(path);
 	const contextEntries = buildContextEntries(entries, leafId, byId);
-	const edits = new Map<string, ContextEditEntry>();
-	for (const entry of contextEntries) {
-		if (entry.type === "context_edit") edits.set(entry.targetId, entry);
-	}
+	const changes = resolveContextChanges(entries, path, legacyPruneChanges);
 	const projectedEntries = contextEntries.map(
 		(sourceEntry, index): ProjectedSessionEntry => ({
 			sourceEntry,
@@ -647,7 +667,7 @@ export function buildSessionProjection(
 			messages:
 				sourceEntry.type === "compaction" && index > 0
 					? []
-					: projectContextEntry(sourceEntry, edits.get(sourceEntry.id)),
+					: projectContextEntry(sourceEntry, changes.get(sourceEntry.id)),
 		}),
 	);
 	return {
@@ -663,14 +683,9 @@ export function buildSessionContext(
 	entries: SessionEntry[],
 	leafId?: string | null,
 	byId?: Map<string, SessionEntry>,
-	pruneStateById?: ReadonlyMap<string, PruneState>,
-	pruneSummaryById?: ReadonlyMap<string, string>,
+	legacyPruneChanges?: ReadonlyMap<string, PruneEntry>,
 ): SessionContext {
-	const { messages, thinkingLevel, model } = applyPruneState(
-		buildSessionProjection(entries, leafId, byId),
-		pruneStateById,
-		pruneSummaryById,
-	);
+	const { messages, thinkingLevel, model } = buildSessionProjection(entries, leafId, byId, legacyPruneChanges);
 	return { messages, thinkingLevel, model };
 }
 
@@ -1087,8 +1102,12 @@ export class SessionManager {
 	private byId: Map<string, SessionEntry> = new Map();
 	private labelsById: Map<string, string> = new Map();
 	private labelTimestampsById: Map<string, string> = new Map();
-	private pruneStateById: Map<string, PruneState> = new Map();
-	private pruneSummaryById: Map<string, string> = new Map();
+	private legacyPruneChanges: Map<string, PruneEntry> = new Map();
+	private contextChangesCache?: {
+		entryCount: number;
+		leafId: string | null;
+		changes: Map<string, ResolvedContextChange>;
+	};
 	private leafId: string | null = null;
 
 	private constructor(
@@ -1166,8 +1185,8 @@ export class SessionManager {
 		this.byId.clear();
 		this.labelsById.clear();
 		this.labelTimestampsById.clear();
-		this.pruneStateById.clear();
-		this.pruneSummaryById.clear();
+		this.legacyPruneChanges.clear();
+		this.contextChangesCache = undefined;
 		this.leafId = null;
 		this.flushed = false;
 
@@ -1200,8 +1219,8 @@ export class SessionManager {
 		this.byId.clear();
 		this.labelsById.clear();
 		this.labelTimestampsById.clear();
-		this.pruneStateById.clear();
-		this.pruneSummaryById.clear();
+		this.legacyPruneChanges.clear();
+		this.contextChangesCache = undefined;
 		this.leafId = null;
 		for (const entry of this.fileEntries) {
 			if (entry.type === "session") continue;
@@ -1216,18 +1235,8 @@ export class SessionManager {
 					this.labelTimestampsById.delete(entry.targetId);
 				}
 			} else if (entry.type === "prune") {
-				// "included" restores the default; store only non-default states.
-				if (entry.state === "included") {
-					this.pruneStateById.delete(entry.targetId);
-					this.pruneSummaryById.delete(entry.targetId);
-				} else {
-					this.pruneStateById.set(entry.targetId, entry.state);
-					if (entry.state === "summarized" && entry.summary) {
-						this.pruneSummaryById.set(entry.targetId, entry.summary);
-					} else {
-						this.pruneSummaryById.delete(entry.targetId);
-					}
-				}
+				// Retain restorations too: path extraction must preserve their usage-invalidation provenance.
+				this.legacyPruneChanges.set(entry.targetId, entry);
 			}
 		}
 	}
@@ -1465,8 +1474,25 @@ export class SessionManager {
 		return entry.id;
 	}
 
-	/** Append a branch-local edit to an earlier model-visible entry. */
-	appendContextEdit(targetId: string, replacement: ContextEditEntry["replacement"]): string {
+	private _getContextEditTarget(targetId: string, activeBranchIds?: ReadonlySet<string>): SessionEntry {
+		const target = this.byId.get(targetId);
+		if (!target) throw new Error(`Entry ${targetId} not found`);
+		const branchIds = activeBranchIds ?? new Set(this.getBranch().map((entry) => entry.id));
+		if (!branchIds.has(targetId)) {
+			throw new Error(`Entry ${targetId} is not on the active branch`);
+		}
+		if (sessionEntryToContextMessages(target).length === 0) {
+			throw new Error(`Entry ${targetId} does not contribute editable model content`);
+		}
+		return target;
+	}
+
+	private _validateContextEdit(
+		targetId: string,
+		replacement: ContextEditEntry["replacement"],
+		curation?: ContextEditEntry["curation"],
+		activeBranchIds?: ReadonlySet<string>,
+	): { target: SessionEntry; replacement: ContextEditEntry["replacement"] } {
 		if (
 			replacement !== null &&
 			(typeof replacement !== "object" ||
@@ -1475,18 +1501,15 @@ export class SessionManager {
 		) {
 			throw new Error("Context edit replacement must be null or contain string/array content");
 		}
-		const target = this.byId.get(targetId);
-		if (!target) throw new Error(`Entry ${targetId} not found`);
-		if (!this.getBranch().some((entry) => entry.id === targetId)) {
-			throw new Error(`Entry ${targetId} is not on the active branch`);
+		const target = this._getContextEditTarget(targetId, activeBranchIds);
+		if (
+			target.type === "message" &&
+			target.message.role === "system" &&
+			replacement !== null &&
+			curation !== "summary"
+		) {
+			throw new Error(`Entry ${targetId} does not contribute editable model content`);
 		}
-		const editable =
-			target.type === "custom_message" ||
-			(target.type === "message" &&
-				(target.message.role === "user" ||
-					target.message.role === "assistant" ||
-					target.message.role === "toolResult"));
-		if (!editable) throw new Error(`Entry ${targetId} does not contribute editable model content`);
 		const targetRole = target.type === "message" ? target.message.role : "custom";
 		const normalizedReplacement =
 			replacement !== null &&
@@ -1494,6 +1517,16 @@ export class SessionManager {
 			typeof replacement.content === "string"
 				? { content: [{ type: "text" as const, text: replacement.content }] }
 				: replacement;
+		return { target, replacement: normalizedReplacement };
+	}
+
+	/** Append a branch-local edit to an earlier model-visible entry. */
+	appendContextEdit(
+		targetId: string,
+		replacement: ContextEditEntry["replacement"],
+		curation?: ContextEditEntry["curation"],
+	): string {
+		const { replacement: normalizedReplacement } = this._validateContextEdit(targetId, replacement, curation);
 		const entry: ContextEditEntry = {
 			type: "context_edit",
 			id: generateId(this.byId),
@@ -1501,6 +1534,21 @@ export class SessionManager {
 			timestamp: new Date().toISOString(),
 			targetId,
 			replacement: normalizedReplacement,
+			...(curation ? { curation } : {}),
+		};
+		this._appendEntry(entry);
+		return entry.id;
+	}
+
+	/** Restore the raw original on the active ancestry, overriding even legacy global state. */
+	appendContextEditCancel(targetId: string): string {
+		this._getContextEditTarget(targetId);
+		const entry: ContextEditCancelEntry = {
+			type: "context_edit_cancel",
+			id: generateId(this.byId),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			targetId,
 		};
 		this._appendEntry(entry);
 		return entry.id;
@@ -1547,25 +1595,30 @@ export class SessionManager {
 	 * Returns undefined when not pruned (default "included").
 	 */
 	getPruneState(id: string): PruneState | undefined {
-		return this.pruneStateById.get(id);
+		return contextChangeState(this._getContextChanges().get(id));
 	}
 
-	/**
-	 * Returns the full prune state map (entry id -> PruneState).
-	 * Entries not in the map are implicitly "included".
-	 */
-	getPruneStateMap(): ReadonlyMap<string, PruneState> {
-		return this.pruneStateById;
-	}
-
-	/** Returns persisted replacement summaries keyed by the summarized block's first entry. */
-	getPruneSummaryMap(): ReadonlyMap<string, string> {
-		return this.pruneSummaryById;
+	/** Latest legacy global records, including restorations needed for extraction and usage invalidation. */
+	getLegacyPruneChanges(): ReadonlyMap<string, PruneEntry> {
+		return this.legacyPruneChanges;
 	}
 
 	/** Return the persisted replacement summary for a summarized block's first entry. */
 	getPruneSummary(id: string): string | undefined {
-		return this.pruneSummaryById.get(id);
+		const change = this._getContextChanges().get(id);
+		if (change?.type === "prune") return change.state === "summarized" ? change.summary : undefined;
+		if (change?.curation !== "summary" || change.replacement === null) return undefined;
+		const text = contentText(change.replacement.content);
+		return text.startsWith(CONTEXT_BLOCK_SUMMARY_PREFIX) ? text.slice(CONTEXT_BLOCK_SUMMARY_PREFIX.length) : text;
+	}
+
+	private _getContextChanges(): ReadonlyMap<string, ResolvedContextChange> {
+		const cached = this.contextChangesCache;
+		if (cached && cached.entryCount === this.fileEntries.length && cached.leafId === this.leafId)
+			return cached.changes;
+		const changes = resolveContextChanges(this.getEntries(), this.getBranch(), this.legacyPruneChanges);
+		this.contextChangesCache = { entryCount: this.fileEntries.length, leafId: this.leafId, changes };
+		return changes;
 	}
 
 	/**
@@ -1596,38 +1649,53 @@ export class SessionManager {
 		return entry.id;
 	}
 
-	/**
-	 * Set or clear a context-inclusion marker on an entry.
-	 * "excluded" removes the entry, "included" restores it, and "summarized"
-	 * replaces it with summary text when one is provided.
-	 * Global (not branch-scoped) — see PruneState.
-	 */
-	appendPruneChange(targetId: string, state: PruneState, summary?: string): string {
-		if (!this.byId.has(targetId)) {
-			throw new Error(`Entry ${targetId} not found`);
-		}
-		const entry: PruneEntry = {
-			type: "prune",
-			id: generateId(this.byId),
-			parentId: this.leafId,
-			timestamp: new Date().toISOString(),
-			targetId,
-			state,
-			...(summary ? { summary } : {}),
-		};
-		this._appendEntry(entry);
-		if (state === "included") {
-			this.pruneStateById.delete(targetId);
-			this.pruneSummaryById.delete(targetId);
-		} else {
-			this.pruneStateById.set(targetId, state);
-			if (state === "summarized" && summary) {
-				this.pruneSummaryById.set(targetId, summary);
-			} else {
-				this.pruneSummaryById.delete(targetId);
+	/** Persist a curation action using context_edit or the fork-only cancellation marker. */
+	appendContextChange(targetId: string, state: PruneState, summary?: string): string {
+		return this.appendContextChanges([{ targetId, state, summary }])[0]!;
+	}
+
+	/** Validate a complete curation batch before appending any branch-local markers. */
+	appendContextChanges(changes: readonly { targetId: string; state: PruneState; summary?: string }[]): string[] {
+		if (changes.length === 0) return [];
+		const activeBranchIds = new Set(this.getBranch().map((entry) => entry.id));
+		const validated = changes.map(({ targetId, state, summary }) => {
+			if (state !== "included" && state !== "excluded" && state !== "summarized") {
+				throw new Error(`Invalid context curation state: ${String(state)}`);
 			}
+			if (summary !== undefined && typeof summary !== "string") {
+				throw new Error("Context summary must be a string");
+			}
+			if (state === "included") {
+				this._getContextEditTarget(targetId, activeBranchIds);
+				return { targetId, state };
+			}
+			const curation: ContextEditEntry["curation"] = state === "summarized" ? "summary" : undefined;
+			const replacement =
+				state === "summarized" && summary ? { content: CONTEXT_BLOCK_SUMMARY_PREFIX + summary } : null;
+			const validatedEdit = this._validateContextEdit(targetId, replacement, curation, activeBranchIds);
+			return { targetId, state, replacement: validatedEdit.replacement, curation };
+		});
+
+		const ids: string[] = [];
+		for (const change of validated) {
+			const id = generateId(this.byId);
+			const timestamp = new Date().toISOString();
+			const entry: ContextEditEntry | ContextEditCancelEntry =
+				change.state === "included"
+					? { type: "context_edit_cancel", id, parentId: this.leafId, timestamp, targetId: change.targetId }
+					: {
+							type: "context_edit",
+							id,
+							parentId: this.leafId,
+							timestamp,
+							targetId: change.targetId,
+							replacement: change.replacement,
+							...(change.curation ? { curation: change.curation } : {}),
+						};
+			this._appendEntry(entry);
+			ids.push(id);
 		}
-		return entry.id;
+		return ids;
 	}
 
 	/**
@@ -1652,7 +1720,11 @@ export class SessionManager {
 	 * Uses tree traversal from current leaf.
 	 */
 	buildContextEntries(): SessionEntry[] {
-		return buildContextEntries(this.getEntries(), this.leafId, this.byId, this.pruneStateById);
+		const changes = this._getContextChanges();
+		return buildContextEntries(this.getEntries(), this.leafId, this.byId).filter((entry) => {
+			const state = contextChangeState(changes.get(entry.id));
+			return state !== "excluded" && state !== "summarized";
+		});
 	}
 
 	/**
@@ -1669,15 +1741,11 @@ export class SessionManager {
 	 * Uses tree traversal from current leaf.
 	 */
 	buildSessionProjection(): SessionProjection {
-		return applyPruneState(
-			buildSessionProjection(this.getEntries(), this.leafId, this.byId),
-			this.pruneStateById,
-			this.pruneSummaryById,
-		);
+		return buildSessionProjection(this.getEntries(), this.leafId, this.byId, this.legacyPruneChanges);
 	}
 
 	buildSessionContext(): SessionContext {
-		return buildSessionContext(this.getEntries(), this.leafId, this.byId, this.pruneStateById, this.pruneSummaryById);
+		return buildSessionContext(this.getEntries(), this.leafId, this.byId, this.legacyPruneChanges);
 	}
 
 	/**
@@ -1870,21 +1938,11 @@ export class SessionManager {
 			}
 		}
 
-		// Collect prune states for entries in the path
-		const prunesToWrite: Array<{ targetId: string; state: PruneState; timestamp: string; summary?: string }> = [];
-		for (const [targetId, state] of this.pruneStateById) {
-			if (!pathEntryIds.has(targetId)) continue;
-
-			// Prune state is global, so its latest marker can be on a sibling branch.
-			// Find it in the complete session rather than only in the selected path.
-			for (let i = this.fileEntries.length - 1; i >= 0; i--) {
-				const entry = this.fileEntries[i];
-				if (entry.type === "prune" && entry.targetId === targetId) {
-					prunesToWrite.push({ targetId, state, timestamp: entry.timestamp, summary: entry.summary });
-					break;
-				}
-			}
-		}
+		// Copy the legacy global baseline, including markers from siblings. These are
+		// existing records, not newly authored prune actions. Path-local edits/cancels
+		// remain in the extracted path and override this baseline in the resolver.
+		const prunesToWrite = [...this.legacyPruneChanges.values()].filter((entry) => pathEntryIds.has(entry.targetId));
+		for (const entry of prunesToWrite) pathEntryIds.add(entry.id);
 
 		if (this.persist) {
 			// Build label and prune entries
@@ -1906,16 +1964,8 @@ export class SessionManager {
 			}
 
 			const pruneEntries: PruneEntry[] = [];
-			for (const { targetId, state, timestamp: pruneTimestamp, summary } of prunesToWrite) {
-				const pruneEntry: PruneEntry = {
-					type: "prune",
-					id: generateId(new Set(pathEntryIds)),
-					parentId,
-					timestamp: pruneTimestamp,
-					targetId,
-					state,
-					...(summary ? { summary } : {}),
-				};
+			for (const legacyEntry of prunesToWrite) {
+				const pruneEntry: PruneEntry = { ...legacyEntry, parentId };
 				pathEntryIds.add(pruneEntry.id);
 				pruneEntries.push(pruneEntry);
 				parentId = pruneEntry.id;
@@ -1959,18 +2009,8 @@ export class SessionManager {
 		}
 
 		const pruneEntries: PruneEntry[] = [];
-		for (const { targetId, state, timestamp: pruneTimestamp, summary } of prunesToWrite) {
-			const pruneEntry: PruneEntry = {
-				type: "prune",
-				id: generateId(
-					new Set([...pathEntryIds, ...labelEntries.map((e) => e.id), ...pruneEntries.map((e) => e.id)]),
-				),
-				parentId,
-				timestamp: pruneTimestamp,
-				targetId,
-				state,
-				...(summary ? { summary } : {}),
-			};
+		for (const legacyEntry of prunesToWrite) {
+			const pruneEntry: PruneEntry = { ...legacyEntry, parentId };
 			pruneEntries.push(pruneEntry);
 			parentId = pruneEntry.id;
 		}

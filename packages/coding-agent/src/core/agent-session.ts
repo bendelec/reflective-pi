@@ -123,6 +123,7 @@ import { exportSessionToJsonl } from "./session-export.ts";
 import {
 	type BranchSummaryEntry,
 	type CompactionEntry,
+	type ContextEditCancelEntry,
 	type ContextEditEntry,
 	getLatestCompactionEntry,
 	type PruneState,
@@ -638,7 +639,11 @@ export class AgentSession {
 			!model ||
 			model.contextWindow <= 0 ||
 			!shouldCompact(
-				estimateProjectedContextTokens(projection, this.sessionManager.getBranch()).tokens,
+				estimateProjectedContextTokens(
+					projection,
+					this.sessionManager.getBranch(),
+					this.sessionManager.getEntries(),
+				).tokens,
 				model.contextWindow,
 				settings,
 			)
@@ -919,6 +924,7 @@ export class AgentSession {
 					const tokensBefore = estimateProjectedContextTokens(
 						manager.buildSessionProjection(),
 						manager.getBranch(),
+						manager.getEntries(),
 					).tokens;
 					entryId = manager.appendCompaction(
 						draft.summary,
@@ -2533,9 +2539,8 @@ export class AgentSession {
 	 * the context sent to the model on subsequent turns.
 	 */
 	setPruneState(entryIds: readonly string[], state: PruneState): void {
-		for (const entryId of entryIds) {
-			this.sessionManager.appendPruneChange(entryId, state);
-		}
+		if (entryIds.length === 0) return;
+		this.sessionManager.appendContextChanges(entryIds.map((targetId) => ({ targetId, state })));
 		this.agent.state.messages = this.sessionManager.buildSessionContext().messages;
 		this._pruneHappenedThisTurn = true;
 		this._pruneSkipNextCompactionCheck = true;
@@ -2543,9 +2548,14 @@ export class AgentSession {
 
 	/** Replace one atomic context block with a persisted summary. */
 	setBlockSummary(entryIds: readonly string[], summary: string): void {
-		for (const [index, entryId] of entryIds.entries()) {
-			this.sessionManager.appendPruneChange(entryId, "summarized", index === 0 ? summary : undefined);
-		}
+		if (entryIds.length === 0) return;
+		this.sessionManager.appendContextChanges(
+			entryIds.map((targetId, index) => ({
+				targetId,
+				state: "summarized",
+				summary: index === 0 ? summary : undefined,
+			})),
+		);
 		this.agent.state.messages = this.sessionManager.buildSessionContext().messages;
 		this._pruneHappenedThisTurn = true;
 		this._pruneSkipNextCompactionCheck = true;
@@ -2624,10 +2634,14 @@ export class AgentSession {
 			} = await this._getSummarizationRequestAuth(model, this._compactionAbortController.signal);
 
 			const pathEntries = this.sessionManager.getBranch();
-			const pruneStateById = this.sessionManager.getPruneStateMap();
-			const pruneSummaryById = this.sessionManager.getPruneSummaryMap();
+			const legacyPruneChanges = this.sessionManager.getLegacyPruneChanges();
 
-			const preparation = prepareCompaction(pathEntries, settings, pruneStateById, pruneSummaryById);
+			const preparation = prepareCompaction(
+				pathEntries,
+				settings,
+				legacyPruneChanges,
+				this.sessionManager.getEntries(),
+			);
 			if (!preparation) {
 				// Check why we can't compact
 				const lastEntry = pathEntries[pathEntries.length - 1];
@@ -2844,22 +2858,36 @@ export class AgentSession {
 		const branch = this.sessionManager.getBranch();
 		const assistantIndex = assistantEntryId ? branch.findIndex((entry) => entry.id === assistantEntryId) : -1;
 		const entriesAfterAssistant = assistantIndex >= 0 ? branch.slice(assistantIndex + 1) : [];
-		const hasPostAssistantContextEdit = entriesAfterAssistant.some((entry) => entry.type === "context_edit");
+		const hasPostAssistantContextEdit = entriesAfterAssistant.some(
+			(entry) => entry.type === "context_edit" || entry.type === "context_edit_cancel",
+		);
 		const latestAssistantEdit = entriesAfterAssistant
 			.filter(
-				(entry): entry is ContextEditEntry => entry.type === "context_edit" && entry.targetId === assistantEntryId,
+				(entry): entry is ContextEditEntry | ContextEditCancelEntry =>
+					(entry.type === "context_edit" || entry.type === "context_edit_cancel") &&
+					entry.targetId === assistantEntryId,
 			)
 			.at(-1);
 		const assistantRetainedForExplicitRecovery =
 			assistantEntryId === undefined ||
 			(!entriesAfterAssistant.some((entry) => entry.type === "compaction") &&
-				latestAssistantEdit?.replacement !== null);
+				(latestAssistantEdit?.type !== "context_edit" || latestAssistantEdit.replacement !== null));
 		const assistantUsageMatchesProjection = assistantIsProjected && !hasPostAssistantContextEdit;
 		const explicitOverflow = assistantMessage.stopReason === "error" && isContextOverflow(assistantMessage);
+		const sessionEntries = this.sessionManager.getEntries();
+		const hasContextChanges = sessionEntries.some(
+			(entry) => entry.type === "prune" || entry.type === "context_edit" || entry.type === "context_edit_cancel",
+		);
+		const contextEstimateAfterChanges = hasContextChanges
+			? estimateProjectedContextTokens(currentProjection, branch, sessionEntries)
+			: undefined;
+		const inferredOverflow =
+			assistantUsageMatchesProjection &&
+			isContextOverflow(assistantMessage, contextWindow) &&
+			(!hasContextChanges ||
+				(contextEstimateAfterChanges !== undefined && contextEstimateAfterChanges.lastUsageIndex !== null));
 		const contextOverflow =
-			sameModel &&
-			((explicitOverflow && assistantRetainedForExplicitRecovery) ||
-				(assistantUsageMatchesProjection && isContextOverflow(assistantMessage, contextWindow)));
+			sameModel && ((explicitOverflow && assistantRetainedForExplicitRecovery) || inferredOverflow);
 		const recoverableLength =
 			sameModel && assistantIsProjected && isRecoverableLength(assistantMessage, this.model?.maxTokens ?? 0);
 		if (contextOverflow || recoverableLength) {
@@ -2905,10 +2933,11 @@ export class AgentSession {
 		// responses can still compact and do not reset context accounting.
 		let contextTokens: number;
 		const projection = currentProjection;
-		const hasContextEdits = projection.entries.some((entry) => entry.sourceEntry.type === "context_edit");
 		const directContextTokens = assistantMessage.usage ? calculateContextTokens(assistantMessage.usage) : 0;
-		if (hasContextEdits) {
-			contextTokens = estimateProjectedContextTokens(projection, branch).tokens;
+		if (hasContextChanges) {
+			contextTokens =
+				contextEstimateAfterChanges?.tokens ??
+				estimateProjectedContextTokens(projection, branch, sessionEntries).tokens;
 		} else if (assistantMessage.stopReason === "error" || directContextTokens === 0) {
 			const messages = this.agent.state.messages;
 			const estimate = estimateContextTokens(messages);
@@ -2961,10 +2990,14 @@ export class AgentSession {
 			}
 
 			const pathEntries = this.sessionManager.getBranch();
-			const pruneStateById = this.sessionManager.getPruneStateMap();
-			const pruneSummaryById = this.sessionManager.getPruneSummaryMap();
+			const legacyPruneChanges = this.sessionManager.getLegacyPruneChanges();
 
-			const preparation = prepareCompaction(pathEntries, settings, pruneStateById, pruneSummaryById);
+			const preparation = prepareCompaction(
+				pathEntries,
+				settings,
+				legacyPruneChanges,
+				this.sessionManager.getEntries(),
+			);
 			if (!preparation) {
 				return false;
 			}
@@ -4393,7 +4426,7 @@ export class AgentSession {
 			if (!hasPostCompactionUsage) return { tokens: null, contextWindow, percent: null };
 		}
 
-		const estimate = estimateProjectedContextTokens(projection, branch);
+		const estimate = estimateProjectedContextTokens(projection, branch, this.sessionManager.getEntries());
 		const percent = (estimate.tokens / contextWindow) * 100;
 
 		return {

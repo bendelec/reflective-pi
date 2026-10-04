@@ -112,8 +112,10 @@ atomic block independently to a summary model, then replaces the original block
 at its original chronological position with the resulting summary. If any summary
 request fails, no selected block is changed.
 
-By default, rxpi uses the active agent model. A faster or less expensive model can
-be configured for block summaries only:
+For a tool-call block, the summary replaces the assistant tool-call entry and the
+following result entries are omitted, preserving an atomic summarized state. The
+summary retains the original message role. By default, rxpi uses the active agent
+model. A faster or less expensive model can be configured for block summaries only:
 
 ```json
 {
@@ -130,20 +132,32 @@ This setting does not change manual or automatic compaction.
 
 ## Context changes are reversible
 
-Every curation action is stored as an append-only `PruneEntry` in the session file.
-A marker records the target entry and one of three latest-wins states:
+New curation actions are stored as append-only standard `context_edit` entries.
+An exclusion uses `replacement: null`; a summary uses `replacement: { content }`.
+Summary edits may carry fork-only `curation: "summary"` metadata so the UI and
+curation state can identify summaries. The head summary begins with
+`[Summary of previously summarized context block]\n`. The original transcript
+entry remains unchanged. `/prune` restoration appends a separate
+`context_edit_cancel` entry rather than rewriting the original or encoding restore
+as a replacement value. Legacy `prune` entries are still read as a session-global
+baseline, but rxpi no longer writes them.
 
-- `included` — use the original block (the default);
-- `excluded` — omit the original block; or
-- `summarized` — omit the original block and insert its stored replacement summary.
+New edits and cancels are scoped by their `id`/`parentId` ancestry. Descendants
+inherit the operation and siblings are unaffected; a cancel affects earlier edits
+for that target on its path. Existing legacy baseline state remains global until
+an active-path edit or cancel supersedes it. A cancel restores the raw original,
+not the legacy baseline. Compaction retention is applied to the original branch
+first, so restoration cannot recover entries outside the retained range. No
+existing file is automatically rewritten.
 
-The transcript and session tree retain the original entries. When context is built,
-rxpi filters excluded entries and substitutes summaries where required. A restored
-`included` marker reveals the original block again.
-
-Markers are session-global rather than branch-scoped in this MVP. A change made on
-one branch can therefore affect another branch. Do not rely on branch-local pruning
-until prune markers carry an explicit branch identity in `SessionManager`.
+This is not full behavioral compatibility with upstream pi. Upstream v0.87.1
+accepts unknown entry types, but ignores `context_edit_cancel`; its projection
+therefore may continue to omit an entry restored in rxpi. It also supports
+replacements for a narrower role set than rxpi: replacements of fork-specific
+roles such as `contextStatus`, compaction summaries, branch summaries, or bash
+messages may be ignored upstream. In particular, do not assume unknown `contextStatus`
+messages are safe to send through every upstream model API. Null exclusions have
+broader upstream projection support than these fork-specific behaviors.
 
 ## `/prune`: user review and recovery
 
@@ -155,16 +169,18 @@ until prune markers carry an explicit branch identity in `SessionManager`.
 - `Ctrl+A` switches between included-only and show-all views.
 
 The show-all view marks excluded blocks as `[pruned]` and summarized blocks as
-`[summarized]`. Selecting either and restoring it changes its state to `included`.
-The selector can inspect and restore summaries, but cannot create one; use
-`summarize_context` for that.
+`[summarized]`. Selecting either and restoring it returns the raw original block
+by appending cancellation entries. The selector can inspect and restore summaries,
+but cannot create one; use `summarize_context` for that.
 
 ## Planned work
 
 - Show per-block token use or a trustworthy capacity estimate in `list_context`
   and `/prune`.
 - Allow users to request summaries from `/prune`.
-- Make curation state branch-scoped by recording a branch identity on prune markers.
+- CPU and rendering performance remains open; the footer cherry-pick survived the
+  base-update merge, while summarize-leakage hotfix `87588a654` was separate from
+  the migration.
 
 ## Implementation map
 

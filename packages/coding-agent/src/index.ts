@@ -267,6 +267,7 @@ export {
 	buildSessionProjection,
 	type CompactionEntry,
 	type ContextEditableContent,
+	type ContextEditCancelEntry,
 	type ContextEditEntry,
 	CURRENT_SESSION_VERSION,
 	type CustomEntry,

@@ -22,9 +22,9 @@ projection that grows during a live run.
 ## Durable session tree
 
 A `SessionEntry` has an ID, parent ID, timestamp, and type. Context-relevant
-entry types include messages, compactions, branch summaries, and custom messages.
-State and bookkeeping types include labels, model and thinking-level changes,
-session information, and curation markers (`prune`).
+entry types include messages, compactions, branch summaries, custom messages, and
+context edits/cancellations. State and bookkeeping types include labels, model and
+thinking-level changes, session information, and legacy `prune` markers.
 
 `SessionManager` keeps:
 
@@ -54,13 +54,16 @@ It performs four distinct operations.
    root and reverses the result.
 2. **Recover session settings.** `getSessionContextSettings()` finds the latest
    model and thinking-level changes on that path.
-3. **Apply compaction and curation.** `buildContextEntries()` retains the latest
-   compaction summary, its retained tail, and all newer entries. It then resolves
-   curation markers: excluded entries are omitted, and summarized originals are
-   omitted pending replacement.
-4. **Project entries to messages.** `buildSessionContext()` converts entries to
-   `AgentMessage` values and inserts a stored summary at the original position of
-   every summarized block. State markers themselves never become model messages.
+3. **Apply retention and curation.** Compaction retention is applied to the
+   original branch path first. The effective curation map combines legacy
+   session-global `prune` state with `context_edit` and `context_edit_cancel`
+   operations found on the active path. Active-path operations override the
+   legacy baseline; edits and cancels do not affect sibling paths.
+4. **Project entries to messages.** Entries are projected once with the resolved
+   curation state. Excluded targets disappear; summaries replace original content.
+   Modern replacements preserve ordinary message roles; legacy summaries, bash
+   summaries, and explicit system-message summaries use custom summary messages.
+   State markers themselves never become model messages.
 
 The resulting order after compaction is:
 
@@ -68,27 +71,30 @@ The resulting order after compaction is:
 [compaction summary, retained tail, messages after compaction]
 ```
 
-Curation works on this already-compaction-truncated view. A curation marker does
-not alter the tree or JSONL history; it changes only the next context projection.
+Curation works on this compaction-truncated view. A curation marker does not
+alter the tree or JSONL history; it changes only the context projection. A cancel
+restores the raw original, not the legacy baseline state, and cannot recover an
+entry already removed by compaction retention.
 
 ### Curation state
 
-A latest-wins `PruneEntry` records one of three states for a target entry:
+The UI and tools continue to use `PruneState` (`included`, `excluded`,
+`summarized`) as a presentation model. New writes use the standard `context_edit`
+entry: `replacement: null` excludes the target, while `replacement: { content }`
+replaces its content. Summary edits may include fork-only `curation: "summary"`
+metadata. A separate fork-only `context_edit_cancel` entry cancels prior edits for
+a target on its active ancestry. Descendants inherit changes; siblings do not.
 
-| State | Context behavior |
-| --- | --- |
-| `included` | Keep the original entry; this is the default. |
-| `excluded` | Omit the original entry. |
-| `summarized` | Omit the original entry and add its stored replacement summary. |
+`SessionManager.appendContextChange(targetId, state, summary?)` is the writer.
+The legacy `PruneEntry` reader supports existing files; there is no automatic
+migration or rewrite of those files. `/fork` and `/clone` extract a selected path,
+carrying the legacy baseline for retained targets; CLI `--fork` copies the full tree.
+For atomic block behavior and the upstream compatibility boundary, see
+[Context curation internals](prune.md).
 
-The target is the first entry in an atomic block. For a tool exchange, the same
-state is written for the assistant tool-call entry and every following tool result,
-so the exchange is omitted or restored as a unit. See
-[Context curation internals](prune.md) for block grouping and persistence details.
-
-Compaction truncation is calculated before curation filtering. Thus an excluded
-compaction entry still establishes the historical cut, even though its summary is
-not sent to the model.
+Compaction truncation precedes curation filtering. Thus an excluded compaction
+entry still establishes the historical cut, even though its summary is not sent
+to the model.
 
 ## Live turns are incremental
 

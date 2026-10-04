@@ -62,18 +62,27 @@ describe("compaction with summarized prune blocks", () => {
 			timestamp: 5,
 		});
 		const summary = "The file was inspected and contains the required project configuration.";
-		session.appendPruneChange(callId, "summarized", summary);
-		session.appendPruneChange(resultId, "summarized");
+		session.appendContextChange(callId, "summarized", summary);
+		session.appendContextChange(resultId, "summarized");
 
 		const projection = session.buildSessionProjection();
-		const projectedSummary = projection.messages.find((message) => message.role === "custom");
+		const projectedSummary = projection.messages.find(
+			(message) =>
+				(message.role === "assistant" || message.role === "user") &&
+				Array.isArray(message.content) &&
+				message.content.some(
+					(part) =>
+						part.type === "text" && part.text.startsWith("[Summary of previously summarized context block]\n"),
+				),
+		);
 		expect(projectedSummary).toBeDefined();
+		expect(projectedSummary?.role).toBe("assistant");
+		expect(projection.messages.filter((message) => message.role === "toolResult")).toHaveLength(0);
 		const estimatedTokens = estimateProjectedContextTokens(projection, session.getBranch()).tokens;
 		const preparation = prepareCompaction(
 			session.getBranch(),
 			{ ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 7 },
-			session.getPruneStateMap(),
-			session.getPruneSummaryMap(),
+			session.getLegacyPruneChanges(),
 		);
 
 		expect(preparation).toBeDefined();
@@ -83,6 +92,7 @@ describe("compaction with summarized prune blocks", () => {
 		expect(preparedText).not.toContain("private/large.txt");
 		expect(preparedText).not.toContain("RAW_PRIVATE_OUTPUT");
 		expect(preparation?.tokensBefore).toBe(estimatedTokens);
+		expect(session.getEntries().filter((entry) => entry.type === "prune")).toHaveLength(0);
 		expect([...preparation!.fileOps.read]).toEqual([]);
 	});
 });

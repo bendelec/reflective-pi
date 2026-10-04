@@ -359,6 +359,7 @@ class TreeList implements Component {
 			const isSettingsEntry =
 				entry.type === "label" ||
 				entry.type === "context_edit" ||
+				entry.type === "context_edit_cancel" ||
 				entry.type === "custom" ||
 				entry.type === "model_change" ||
 				entry.type === "thinking_level_change" ||
@@ -611,6 +612,9 @@ class TreeList implements Component {
 			case "context_edit":
 				parts.push("context edit", entry.replacement === null ? "omit" : "replace", entry.targetId);
 				break;
+			case "context_edit_cancel":
+				parts.push("context restore", entry.targetId);
+				break;
 			case "label":
 				parts.push("label", entry.label ?? "");
 				break;
@@ -847,6 +851,9 @@ class TreeList implements Component {
 				break;
 			case "context_edit":
 				result = theme.fg("dim", `[context ${entry.replacement === null ? "omit" : "replace"}: ${entry.targetId}]`);
+				break;
+			case "context_edit_cancel":
+				result = theme.fg("dim", `[context restore: ${entry.targetId}]`);
 				break;
 			case "label":
 				result = theme.fg("dim", `[label: ${entry.label ?? "(cleared)"}]`);

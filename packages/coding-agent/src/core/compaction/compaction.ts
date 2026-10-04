@@ -26,10 +26,10 @@ import type {
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { convertToLlm } from "../messages.ts";
 import {
-	applyPruneState,
 	buildSessionProjection,
 	type CompactionEntry,
 	type ProjectedSessionEntry,
+	type PruneEntry,
 	type PruneState,
 	type SessionEntry,
 	type SessionProjection,
@@ -257,10 +257,14 @@ export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEst
 	};
 }
 
-/** Estimate projected context without trusting usage captured before a later edit or compaction. */
+/**
+ * Estimate projected context without trusting usage captured before later curation or compaction.
+ * Complete file order is needed to detect legacy global changes made on sibling branches.
+ */
 export function estimateProjectedContextTokens(
 	projection: SessionProjection,
 	branchEntries: SessionEntry[],
+	sessionEntries: SessionEntry[] = branchEntries,
 ): ContextUsageEstimate {
 	const estimate = estimateContextTokens(projection.messages);
 	if (estimate.lastUsageIndex !== null) {
@@ -279,12 +283,31 @@ export function estimateProjectedContextTokens(
 		let latestInvalidatingEntryIndex = -1;
 		for (let i = branchEntries.length - 1; i >= 0; i--) {
 			const entry = branchEntries[i];
-			if (entry.type === "context_edit" || entry.type === "compaction") {
+			if (entry.type === "context_edit" || entry.type === "context_edit_cancel" || entry.type === "compaction") {
 				latestInvalidatingEntryIndex = i;
 				break;
 			}
 		}
-		if (usageEntryIndex > latestInvalidatingEntryIndex) return estimate;
+		if (usageEntryIndex > latestInvalidatingEntryIndex) {
+			const usageFileIndex = sessionEntries.findIndex((entry) => entry.id === usageEntryId);
+			const latestLegacyChanges = new Map<string, number>();
+			for (let i = 0; i < sessionEntries.length; i++) {
+				const entry = sessionEntries[i];
+				if (entry.type === "prune") latestLegacyChanges.set(entry.targetId, i);
+			}
+			const overriddenTargets = new Set(
+				branchEntries.flatMap((entry) =>
+					entry.type === "context_edit" || entry.type === "context_edit_cancel" ? [entry.targetId] : [],
+				),
+			);
+			// Include omitted targets: removing a message can invalidate an otherwise untouched assistant's usage.
+			const contextIds = new Set(projection.entries.map((entry) => entry.sourceEntry.id));
+			const hasLaterLegacyChange = [...latestLegacyChanges].some(
+				([targetId, index]) =>
+					index > usageFileIndex && contextIds.has(targetId) && !overriddenTargets.has(targetId),
+			);
+			if (usageFileIndex >= 0 && !hasLaterLegacyChange) return estimate;
+		}
 	}
 
 	const currentSystem = getCurrentSystemMessage(projection.messages);
@@ -913,15 +936,15 @@ function findProjectedCutPoint(
 export function prepareCompaction(
 	pathEntries: SessionEntry[],
 	settings: CompactionSettings,
-	pruneStateById?: ReadonlyMap<string, PruneState>,
-	pruneSummaryById?: ReadonlyMap<string, string>,
+	legacyPruneChanges?: ReadonlyMap<string, PruneEntry>,
+	sessionEntries: SessionEntry[] = pathEntries,
 ): CompactionPreparation | undefined {
 	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction") {
 		return undefined;
 	}
 
-	// Pruned blocks must not contribute tokens, cut points, or summary input.
-	const projection = applyPruneState(buildSessionProjection(pathEntries), pruneStateById, pruneSummaryById);
+	// The canonical projection resolves modern context edits and legacy global prune state.
+	const projection = buildSessionProjection(pathEntries, undefined, undefined, legacyPruneChanges);
 	const projectedEntries = projection.entries;
 	const sourceEntries = projectedEntries.map((entry) => entry.sourceEntry);
 	// The newest compaction is projected first. Older compaction entries can still
@@ -933,12 +956,18 @@ export function prepareCompaction(
 	let previousSummary: string | undefined;
 	let boundaryStart = 0;
 	if (prevCompactionIndex >= 0) {
-		previousSummary = (projectedEntries[prevCompactionIndex].sourceEntry as CompactionEntry).summary;
+		const summaryMessage = projectedEntries[prevCompactionIndex].messages.find(
+			(message) =>
+				message.role === "compactionSummary" ||
+				(message.role === "custom" && message.customType === "context_summary"),
+		);
+		if (summaryMessage?.role === "compactionSummary") previousSummary = summaryMessage.summary;
+		else if (summaryMessage?.role === "custom") previousSummary = contentText(summaryMessage.content);
 		// The canonical projection has already selected the previous compaction's retained tail.
 		boundaryStart = prevCompactionIndex + 1;
 	}
 	const boundaryEnd = projectedEntries.length;
-	const tokensBefore = estimateProjectedContextTokens(projection, pathEntries).tokens;
+	const tokensBefore = estimateProjectedContextTokens(projection, pathEntries, sessionEntries).tokens;
 	const cutPoint = findProjectedCutPoint(projectedEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens);
 
 	const firstKeptEntry = projectedEntries[cutPoint.firstKeptEntryIndex]?.sourceEntry;

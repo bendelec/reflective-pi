@@ -142,7 +142,17 @@ Append-only edit of one earlier context-producing entry. It changes only future 
 {"type":"context_edit","id":"g6h7i8j9","parentId":"f6g7h8i9","timestamp":"2024-12-03T14:11:00.000Z","targetId":"c3d4e5f6","replacement":null}
 ```
 
-Targets may be user, assistant, tool-result, or custom-message entries. `replacement: null` omits the target from model context. A non-null `replacement` replaces only the target message content. String replacements for assistant and tool-result entries are normalized to one text block because those roles require content arrays. If several edits target the same entry, the latest edit on the active branch wins. Edits are branch-relative: navigating to a point before the edit reveals the target's original contribution again.
+Targets may be user, assistant, tool-result, custom-message, bash, branch-summary, or other rxpi-supported context entries. `replacement: null` omits the target from model context. A non-null `replacement` replaces the target message content while retaining ordinary message roles and metadata. Bash and explicit system-message summaries instead become custom summary messages; replacing a compaction summary preserves its system checkpoint. String replacements for assistant and tool-result entries are normalized to one text block because those roles require content arrays. Summary edits may include the fork-only `curation: "summary"` metadata; this records summary state for curation display but is not needed to apply the replacement. The head entry of a summarized block starts with `[Summary of previously summarized context block]\n`; for atomic tool-call blocks, result tails are omitted and may also carry summary metadata.
+
+New edits apply only when they are on the active `parentId` ancestry. Descendants inherit edits; siblings are unaffected. Restoration is represented by a separate fork-only entry, not by a `context_edit` replacement value:
+
+```json
+{"type":"context_edit_cancel","id":"h7i8j9k0","parentId":"g6h7i8j9","timestamp":"2024-12-03T14:12:00.000Z","targetId":"c3d4e5f6"}
+```
+
+A cancellation cancels preceding edits for its target on that path; a subsequent edit applies again. Legacy `prune` entries are still read as a session-global latest-wins baseline. Active-path edits and cancellations override it, and cancellation restores the raw original rather than falling back to legacy state. Existing files are not automatically rewritten. Compaction retention is applied before curation, so cancellation cannot recover entries outside the retained range.
+
+Upstream v0.87.1 accepts unknown entry types but ignores `context_edit_cancel`, so its projection may keep a restored target omitted. It also role-filters replacements more narrowly than rxpi; replacement edits for fork-specific roles such as `contextStatus`, compaction summaries, branch summaries, and bash messages may be ignored upstream.
 
 ### BranchSummaryEntry
 
@@ -228,7 +238,7 @@ Entries normally form one tree, but navigation APIs can create multiple roots:
    - Includes entries after the compaction entry
 3. Preserves non-message entries in the selected range so interactive mode can render them
 
-`buildSessionProjection()` then applies the latest `context_edit` for each selected target. It returns the model-visible messages together with their source entries. Omitted targets produce no message; replacements retain the source entry's role and metadata while changing only content. The raw selected entries are not modified.
+The curation projection combines the legacy session-global `prune` baseline with `context_edit` and `context_edit_cancel` entries on the active path, then resolves one effective state per target. Active-path operations override the legacy baseline; sibling-branch edits do not enter the projection. Omitted targets produce no message; modern replacements preserve ordinary message roles and metadata while changing content. Legacy summaries, bash summaries, and explicit system-message summaries use custom summary messages. The raw selected entries are not modified.
 
 `buildSessionContext()` builds on that projection to produce the message list for the LLM:
 
@@ -238,8 +248,8 @@ Entries normally form one tree, but navigation APIs can create multiple roots:
    - `compaction` -> complete system checkpoint followed by `compactionSummary`
    - `branch_summary` -> `branchSummary`
    - `custom_message` -> `CustomMessage`
-   - `context_edit` -> no context message of its own
-   - `usage` and `custom` -> no context message
+   - `context_edit` and `context_edit_cancel` -> no context message of their own
+   - `prune`, `usage`, and `custom` -> no context message
 
 The compaction summary replaces entries before `firstKeptEntryId`. Pre-compaction system messages are folded into the complete checkpoint rather than replayed from the retained range. Retained non-system entries and all entries after the compaction remain available to the LLM.
 
