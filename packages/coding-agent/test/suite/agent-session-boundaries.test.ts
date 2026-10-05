@@ -2,6 +2,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { estimateTokens } from "../../src/core/compaction/compaction.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -535,10 +536,13 @@ describe("AgentSession actionable boundaries", () => {
 		await harness.session.prompt("small prompt");
 
 		expect(harness.eventsOfType("compaction_start")).toEqual([]);
-		// The fork's system prompt is larger than upstream's (~400 extra tokens), so the
-		// post-edit context exceeds upstream's 2,000-token bound; 2,500 still proves the
-		// omitted assistant's 9,800-token usage is not counted.
-		expect(harness.session.getContextUsage()?.tokens).toBeLessThan(2_500);
+		// Tool instructions can grow independently. Assert the canonical estimate,
+		// not an arbitrary prompt-size ceiling; stale 9,800-token usage must not count.
+		expect(harness.session.getContextUsage()?.tokens).toBe(
+			harness.sessionManager
+				.buildSessionContext()
+				.messages.reduce((total, message) => total + estimateTokens(message), 0),
+		);
 	});
 
 	it("does not trigger successful-response overflow from usage captured before a boundary edit", async () => {
@@ -575,9 +579,12 @@ describe("AgentSession actionable boundaries", () => {
 		await harness.session.prompt("large input that is later omitted");
 
 		expect(harness.eventsOfType("compaction_start")).toEqual([]);
-		// Same as above: the fork's larger system prompt needs a slightly higher bound;
-		// the point is that the pre-edit 5,100-token usage does not count.
-		expect(harness.session.getContextUsage()?.tokens).toBeLessThan(2_500);
+		// After the edit, use message-size estimates rather than stale 5,100-token usage.
+		expect(harness.session.getContextUsage()?.tokens).toBe(
+			harness.sessionManager
+				.buildSessionContext()
+				.messages.reduce((total, message) => total + estimateTokens(message), 0),
+		);
 	});
 
 	it("does not trigger threshold compaction from post-edit usage captured before a later compaction", async () => {

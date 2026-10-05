@@ -78,9 +78,9 @@ because they do not contribute messages to model context.
 
 | Tool | Contract |
 | --- | --- |
-| `list_context` | No arguments; lists block IDs and previews; never changes context. |
-| `prune_context` | Requires a non-empty `ids` array; excludes matching blocks. |
-| `summarize_context` | Requires a non-empty `ids` array; summarizes each matching block independently, then replaces it. |
+| `list_context` | No arguments; lists all current block IDs and previews, marking protected blocks; never changes context. |
+| `prune_context` | Requires a non-empty `ids` array; excludes eligible matching blocks and reports protected skips. |
+| `summarize_context` | Requires a non-empty `ids` array; summarizes eligible matching blocks independently, then replaces them; protected IDs do not generate summary requests. |
 
 The mutating tools use a deliberately guided contract. Missing, empty, or wholly
 unknown IDs fail and point to `list_context`; partial matches succeed while
@@ -88,6 +88,37 @@ reporting unknown IDs. This avoids the old dual-mode `prune_context` behavior in
 which a bare call looked like a successful no-op.
 
 The agent can only exclude or summarize context. `/prune` is the restoration path.
+
+### Recent-action protection
+
+`getProtectedRecentBlockIds()` uses the current projected blocks in active-branch
+order. Starting at the newest block, it includes complete blocks until either
+8 blocks or 8192 estimated tokens are reached. This selects the shorter trailing
+span and rounds a token boundary outward to a whole block. A newest tool exchange
+larger than 8192 tokens is protected in full. The existing message-size estimator
+is used on canonical projected messages, not superseded raw entry text; this is
+not exact provider tokenization. Previously summarized blocks remain
+non-selectable as before, but their visible replacements count toward the suffix.
+
+`list_context` retains real IDs and adds `[protected: recent]`, with eligible and
+protected counts. Both mutation tools calculate eligibility at execution time.
+They process eligible requested IDs and report protected IDs separately. A request
+matching only protected blocks returns a normal result explaining that nothing
+changed, why recent actions/results were kept, and how to retry with older
+unprotected IDs. If none remain, it says so instead of encouraging futile retries.
+A protection hit is not itself a reason to compact.
+
+Summarization filters before model/auth lookup when all matches are protected,
+rechecks before each summary request, and checks again before writing replacements.
+A block that becomes protected, disappears, or changes source content during an
+awaited request is kept or skipped rather than overwritten. Summaries use
+canonical projected messages; source snapshots prevent ordinary SDK context edits
+from being overwritten with summaries of superseded content. A genuine summary failure still changes no
+selected blocks. All-protected no-ops do not reset curation accounting/status.
+
+This guard belongs to the agent tools, not the session writer: human `/prune`,
+SDK mutations, recovery edits and compaction retain their existing behavior. No
+new persistence type or format is introduced.
 
 ## `/prune` selector
 

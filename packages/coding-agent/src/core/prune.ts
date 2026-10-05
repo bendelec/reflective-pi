@@ -1,5 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { contentText, type ToolResultMessage } from "@earendil-works/pi-ai";
+import { estimateTokens } from "./compaction/compaction.ts";
 import { type SessionEntry, sessionEntryToContextMessages } from "./session-manager.ts";
 
 /** An atomic block of entries that must be pruned together. */
@@ -8,6 +9,33 @@ export interface PruneBlock {
 	entryIds: string[];
 	/** The entries themselves, in order. */
 	entries: SessionEntry[];
+	/** Canonical model-visible contribution when supplied by the agent tools. */
+	messages?: AgentMessage[];
+}
+
+const MAX_PROTECTED_RECENT_BLOCKS = 8;
+const MAX_PROTECTED_RECENT_TOKENS = 8192;
+
+/**
+ * Return the entry IDs in the recent visible suffix, keeping complete blocks.
+ * The token budget may be crossed by the final block so tool exchanges stay atomic.
+ */
+export function getProtectedRecentBlockIds(blocks: readonly PruneBlock[]): Set<string> {
+	const protectedIds = new Set<string>();
+	let protectedBlocks = 0;
+	let protectedTokens = 0;
+
+	for (let i = blocks.length - 1; i >= 0; i--) {
+		const block = blocks[i];
+		protectedBlocks++;
+		protectedIds.add(block.entryIds[0]);
+		for (const message of block.messages ?? block.entries.flatMap(sessionEntryToContextMessages)) {
+			protectedTokens += estimateTokens(message);
+		}
+		if (protectedBlocks >= MAX_PROTECTED_RECENT_BLOCKS || protectedTokens >= MAX_PROTECTED_RECENT_TOKENS) break;
+	}
+
+	return protectedIds;
 }
 
 /** Rendered preview of a block: the summary line plus indented detail lines. */

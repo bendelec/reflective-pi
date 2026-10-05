@@ -117,7 +117,7 @@ import {
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
-import { groupPruneBlocks, type PruneBlock, previewBlock } from "./prune.ts";
+import { getProtectedRecentBlockIds, groupPruneBlocks, type PruneBlock, previewBlock } from "./prune.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import { exportSessionToJsonl } from "./session-export.ts";
 import {
@@ -323,6 +323,19 @@ export interface SessionStats {
 interface ToolDefinitionEntry {
 	definition: ToolDefinition;
 	sourceInfo: SourceInfo;
+}
+
+function snapshotContextBlock(block: PruneBlock): string {
+	return JSON.stringify([block.entryIds, block.messages]);
+}
+
+interface ContextBlockSelection {
+	blocks: PruneBlock[];
+	protectedIds: Set<string>;
+	eligible: PruneBlock[];
+	protectedBlocks: PruneBlock[];
+	staleBlocks: PruneBlock[];
+	unknown: string[];
 }
 
 function estimateMessagesTokens(messages: AgentMessage[]): number {
@@ -3476,6 +3489,114 @@ export class AgentSession {
 		this.setActiveToolsByName([...new Set(nextActiveToolNames)]);
 	}
 
+	/** Estimate and summarize canonical contributions, not superseded raw entry content. */
+	private _getContextBlockInventory(): { blocks: PruneBlock[]; protectedIds: Set<string> } {
+		const projection = this.sessionManager.buildSessionProjection();
+		const messagesById = new Map(projection.entries.map((entry) => [entry.sourceEntry.id, entry.messages]));
+		const visibleBlocks = groupPruneBlocks(
+			projection.entries.filter((entry) => entry.messages.length > 0).map((entry) => entry.sourceEntry),
+		).map((block) => ({
+			...block,
+			messages: block.entryIds.flatMap((id) => messagesById.get(id) ?? []),
+			entries: block.entries.map((entry) => {
+				const message = messagesById.get(entry.id)?.[0];
+				return entry.type === "message" && message ? { ...entry, message } : entry;
+			}),
+		}));
+		const allProtectedIds = getProtectedRecentBlockIds(visibleBlocks);
+		// Previously curated blocks remain non-selectable, but still count in the visible suffix.
+		const selectableIds = new Set(this.sessionManager.buildContextEntries().map((entry) => entry.id));
+		const blocks = visibleBlocks.filter((block) => selectableIds.has(block.entryIds[0]!));
+		const protectedIds = new Set(
+			blocks.filter((block) => allProtectedIds.has(block.entryIds[0]!)).map((block) => block.entryIds[0]!),
+		);
+		return { blocks, protectedIds };
+	}
+
+	/** Select current blocks once, keeping protection hits separate from argument errors. */
+	private _selectContextBlocks(ids: readonly string[]): ContextBlockSelection {
+		const { blocks, protectedIds } = this._getContextBlockInventory();
+		const blockById = new Map(blocks.map((block) => [block.entryIds[0]!, block]));
+		const eligible: PruneBlock[] = [];
+		const protectedBlocks: PruneBlock[] = [];
+		const unknown: string[] = [];
+		const seen = new Set<string>();
+		for (const rawId of ids) {
+			const id = rawId.trim();
+			if (!id || seen.has(id)) continue;
+			seen.add(id);
+			const block = blockById.get(id);
+			if (!block) unknown.push(id);
+			else if (protectedIds.has(id)) protectedBlocks.push(block);
+			else eligible.push(block);
+		}
+		if (eligible.length === 0 && protectedBlocks.length === 0) {
+			throw new Error(
+				`Error: No current context blocks matched.${unknown.length > 0 ? ` Unknown id(s): ${unknown.join(", ")}.` : ""} Call list_context with no parameters to list the current blocks.`,
+			);
+		}
+		return { blocks, protectedIds, eligible, protectedBlocks, staleBlocks: [], unknown };
+	}
+
+	/** Recheck after awaits: human curation can change the protected suffix during summarization. */
+	private _refreshContextBlockSelection(selection: ContextBlockSelection): void {
+		const inventory = this._getContextBlockInventory();
+		selection.blocks = inventory.blocks;
+		selection.protectedIds = inventory.protectedIds;
+		const currentById = new Map(selection.blocks.map((block) => [block.entryIds[0]!, block]));
+		const eligible: PruneBlock[] = [];
+		for (const block of selection.eligible) {
+			const id = block.entryIds[0]!;
+			const current = currentById.get(id);
+			if (!current) selection.unknown.push(id);
+			else if (selection.protectedIds.has(id)) selection.protectedBlocks.push(current);
+			else eligible.push(current);
+		}
+		selection.eligible = eligible;
+	}
+
+	/** Protection is a normal skip, not a tool failure that should discourage curation. */
+	private _formatContextCurationResult(action: "pruned" | "summarized", selection: ContextBlockSelection): string {
+		const changed = selection.eligible.length;
+		const label = action === "pruned" ? "Pruned" : "Summarized";
+		const lines = [changed > 0 ? `${label} ${changed} block(s).` : `Nothing ${action}.`];
+		for (const block of selection.eligible) {
+			lines.push(`  - ${truncatePreviewLine(previewBlock(block).line)}`);
+		}
+		if (selection.protectedBlocks.length > 0) {
+			lines.push(
+				"",
+				`Kept ${selection.protectedBlocks.length} protected recent block(s): ${selection.protectedBlocks.map((block) => block.entryIds[0]).join(", ")}.`,
+				"Recent-history protection preserves your latest actions and results. These IDs were skipped; any other eligible requested blocks were processed.",
+				"This is a normal protection outcome, not a tool failure. The protection does not itself require compaction.",
+			);
+			const olderRemaining =
+				selection.blocks.length - selection.protectedIds.size - (action === "pruned" ? changed : 0);
+			lines.push(
+				olderRemaining > 0
+					? "Continue curation: call list_context, select older blocks without [protected: recent], and retry without the protected IDs."
+					: "No older unprotected blocks remain eligible. Continue the task; do not retry the same protected selection now.",
+			);
+		}
+		if (selection.staleBlocks.length > 0) {
+			lines.push(
+				"",
+				`Kept changed source block(s): ${selection.staleBlocks.map((block) => block.entryIds[0]).join(", ")}.`,
+				"Their current content differs from what the summary model saw. No stale summaries were applied. Call list_context to review these blocks and retry if their current content still needs summarization.",
+			);
+		}
+		if (selection.unknown.length > 0) {
+			lines.push(
+				"",
+				`Unknown id(s): ${selection.unknown.join(", ")}. These IDs are not selectable in the current context. Call list_context to refresh current block IDs.`,
+			);
+		}
+		if (action === "pruned") {
+			lines.push("", `${selection.blocks.length - changed} block(s) remain.`);
+		}
+		return lines.join("\n");
+	}
+
 	/**
 	 * Create the read-only `list_context` tool.
 	 *
@@ -3488,19 +3609,20 @@ export class AgentSession {
 			name: "list_context",
 			label: "List Context",
 			description:
-				"List the current context blocks with their ids and one-line previews. Takes no parameters and changes nothing. Use the reported ids with prune_context or summarize_context to manage the blocks.",
+				"List the current context blocks with their ids and one-line previews. Takes no parameters and changes nothing. Use unprotected reported ids with prune_context or summarize_context. Blocks marked [protected: recent] preserve your latest actions and results and cannot be automatically pruned or summarized.",
 			promptSnippet: "List current context blocks with ids and previews.",
 			promptGuidelines: [
 				"Call list_context with no parameters to inspect the current blocks and their ids before pruning or summarizing.",
 			],
 			parameters: Type.Object({}),
 			execute: async () => {
-				const blocks = groupPruneBlocks(this.sessionManager.buildContextEntries());
+				const { blocks, protectedIds } = this._getContextBlockInventory();
 				const lines: string[] = [];
 				for (const block of blocks) {
 					const preview = previewBlock(block);
 					const blockId = block.entryIds[0] ?? "(no id)";
-					lines.push(`${blockId}  ${truncatePreviewLine(preview.line)}`);
+					const protection = protectedIds.has(blockId) ? "[protected: recent] " : "";
+					lines.push(`${blockId}  ${protection}${truncatePreviewLine(preview.line)}`);
 					for (const detail of preview.detail) {
 						lines.push(`          ${truncatePreviewLine(detail)}`);
 					}
@@ -3509,10 +3631,11 @@ export class AgentSession {
 					return { content: [{ type: "text", text: "No context blocks to list." }], details: {} };
 				}
 				const text = [
-					`Current context blocks (${blocks.length}) — prune or summarize by id:`,
+					`Current context blocks (${blocks.length}) — ${blocks.length - protectedIds.size} eligible, ${protectedIds.size} protected:`,
+					"Recent blocks are protected from automatic pruning and summarization: the shorter trailing span of 8 blocks or approximately 8192 tokens, rounded to whole blocks.",
 					lines.join("\n"),
 					"",
-					'Listing is read-only. To exclude blocks call prune_context with {"ids": [...]}; to replace blocks with summaries call summarize_context with {"ids": [...]}.',
+					'Listing is read-only. Use IDs without [protected: recent]: exclude with prune_context {"ids": [...]}, or summarize with summarize_context {"ids": [...]}. Protected IDs are skipped, not errors; other eligible IDs still work.',
 				].join("\n");
 				return { content: [{ type: "text", text }], details: {} };
 			},
@@ -3539,12 +3662,13 @@ export class AgentSession {
 			name: "prune_context",
 			label: "Prune Context",
 			description:
-				'Exclude context blocks that no longer matter for the work ahead. Call list_context with no parameters to see the current blocks and their ids, then call prune_context with {"ids": ["id1", "id2"]} to exclude the selected blocks. A tool call and its results are always excluded together. This tool only excludes and cannot restore blocks: keep anything likely to matter for future work. The session transcript remains intact; the user can restore blocks with /prune.',
+				'Exclude context blocks that no longer matter for the work ahead. Call list_context with no parameters to see the current blocks and their ids, then call prune_context with {"ids": ["id1", "id2"]} to exclude the selected blocks. A tool call and its results are always excluded together. This tool only excludes and cannot restore blocks: keep anything likely to matter for future work. The session transcript remains intact; the user can restore blocks with /prune. The shorter trailing span of 8 blocks or approximately 8192 tokens is protected, rounded to whole blocks. Protected IDs are skipped with an explanation; eligible IDs are still pruned. This is not a tool failure: continue curation using older unprotected IDs.',
 			promptSnippet: "Exclude context blocks that no longer matter for the work ahead.",
 			promptGuidelines: [
 				"Treat context hygiene as a quality requirement. At natural work boundaries, use prune_context to remove blocks that no longer support the planned next steps or likely follow-up work; do not wait for context pressure.",
 				"Call list_context to see the current blocks, then exclude the selected ids. A tool call and their results are always excluded together.",
 				"This tool only excludes and cannot restore blocks. Keep anything likely to matter; the user can restore excluded blocks with /prune.",
+				"Blocks marked [protected: recent] preserve your latest actions and results. Skip those IDs; a protection hit is normal, not a tool failure. Continue curation using older unprotected blocks from list_context.",
 			],
 			parameters: schema,
 			// Validate before TypeBox converts malformed values to the typed schema.
@@ -3606,48 +3730,19 @@ export class AgentSession {
 					throw new Error(`Error: All ids must be strings. Found invalid ids: ${invalidIds.join(", ")}`);
 				}
 
-				// Prune the blocks
-				const blocks = groupPruneBlocks(this.sessionManager.buildContextEntries());
-				const blockById = new Map<string, PruneBlock>(blocks.map((block) => [block.entryIds[0]!, block]));
-				const matched: PruneBlock[] = [];
-				const unknown: string[] = [];
-				const seen = new Set<string>();
-
-				for (const rawId of parsedIds) {
-					const id = rawId.trim();
-					if (!id || seen.has(id)) continue;
-					seen.add(id);
-					const block = blockById.get(id);
-					if (block) matched.push(block);
-					else unknown.push(id);
-				}
-				if (matched.length === 0) {
-					throw new Error(
-						`Error: No current context blocks matched.${unknown.length > 0 ? ` Unknown id(s): ${unknown.join(", ")}.` : ""} Call list_context with no parameters to list the current blocks.`,
-					);
-				}
-
-				for (const block of matched) {
+				const selection = this._selectContextBlocks(parsedIds as string[]);
+				for (const block of selection.eligible) {
 					this.setPruneState(block.entryIds, "excluded");
 				}
-
-				// Context shrunk after pruning; the old percent baseline is stale.
-				this._contextStatusLastPercent = null;
-				// Force a context-status message on the next turn so the user can verify the pruning worked
-				this._contextStatusForceNext = true;
-
-				const lines: string[] = [`Pruned ${matched.length} block(s).`];
-				lines.push("");
-				for (const block of matched) {
-					lines.push(`  - ${truncatePreviewLine(previewBlock(block).line)}`);
+				if (selection.eligible.length > 0) {
+					// Only actual changes invalidate pre-curation usage/status baselines.
+					this._contextStatusLastPercent = null;
+					this._contextStatusForceNext = true;
 				}
-				if (unknown.length > 0) {
-					lines.push("");
-					lines.push(`Unknown id(s): ${unknown.join(", ")}.`);
-				}
-				lines.push("");
-				lines.push(`${blocks.length - matched.length} block(s) remain.`);
-				return { content: [{ type: "text", text: lines.join("\n") }], details: {} };
+				return {
+					content: [{ type: "text", text: this._formatContextCurationResult("pruned", selection) }],
+					details: {},
+				};
 			},
 		};
 	}
@@ -3661,11 +3756,12 @@ export class AgentSession {
 			name: "summarize_context",
 			label: "Summarize Context",
 			description:
-				'Replace selected context blocks with concise summaries. First call list_context with no parameters to list the current blocks and ids. Then call summarize_context with {"ids": ["id1", "id2"]}. Each selected atomic block is summarized independently and can be restored with /prune.',
+				'Replace selected context blocks with concise summaries. First call list_context with no parameters to list the current blocks and ids. Then call summarize_context with {"ids": ["id1", "id2"]}. Each eligible atomic block is summarized independently and can be restored with /prune. The shorter trailing span of 8 blocks or approximately 8192 tokens is protected, rounded to whole blocks. Protected IDs are skipped before any summary request; other eligible IDs still work. Continue curation using older unprotected IDs.',
 			promptSnippet: "Replace selected context blocks with concise summaries.",
 			promptGuidelines: [
 				"First call list_context to inspect the current blocks, then use summarize_context for hard-to-reconstruct conclusions needed later when their original detail is no longer needed.",
 				"Use prune_context instead when a block has no likely future value. Summarized blocks can be restored by the user with /prune.",
+				"Do not summarize blocks marked [protected: recent]. Protection hits are normal skips, not tool failures; retry or continue with older unprotected IDs from list_context.",
 			],
 			parameters: schema,
 			prepareArguments: (params) => {
@@ -3695,23 +3791,12 @@ export class AgentSession {
 					throw new Error(`Error: All ids must be strings. Found invalid ids: ${invalidIds.join(", ")}`);
 				}
 
-				const blocks = groupPruneBlocks(this.sessionManager.buildContextEntries());
-				const blockById = new Map<string, PruneBlock>(blocks.map((block) => [block.entryIds[0]!, block]));
-				const matched: PruneBlock[] = [];
-				const unknown: string[] = [];
-				const seen = new Set<string>();
-				for (const rawId of ids) {
-					const id = rawId.trim();
-					if (!id || seen.has(id)) continue;
-					seen.add(id);
-					const block = blockById.get(id);
-					if (block) matched.push(block);
-					else unknown.push(id);
-				}
-				if (matched.length === 0) {
-					throw new Error(
-						`Error: No current context blocks matched.${unknown.length > 0 ? ` Unknown id(s): ${unknown.join(", ")}.` : ""} Call list_context with no parameters to list the current blocks.`,
-					);
+				const selection = this._selectContextBlocks(ids as string[]);
+				if (selection.eligible.length === 0) {
+					return {
+						content: [{ type: "text", text: this._formatContextCurationResult("summarized", selection) }],
+						details: {},
+					};
 				}
 
 				const configuredModel = this.settingsManager.getReflectiveContextSummarizationModel();
@@ -3728,10 +3813,15 @@ export class AgentSession {
 
 				try {
 					const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(model);
-					const summaries: Array<{ block: PruneBlock; summary: string }> = [];
-					for (const block of matched) {
+					const summaries: Array<{ block: PruneBlock; sourceSnapshot: string; summary: string }> = [];
+					for (const candidate of selection.eligible) {
+						// Recheck immediately before each model call, not only when IDs were listed.
+						this._refreshContextBlockSelection(selection);
+						const block = selection.eligible.find((current) => current.entryIds[0] === candidate.entryIds[0]);
+						if (!block) continue;
 						summaries.push({
 							block,
+							sourceSnapshot: snapshotContextBlock(block),
 							summary: await summarizeBlock({
 								block,
 								model: requestModel,
@@ -3743,20 +3833,31 @@ export class AgentSession {
 							}),
 						});
 					}
-					for (const { block, summary } of summaries) {
-						this.setBlockSummary(block.entryIds, summary);
+					// Preserve any new protection/exclusion that appeared while a summary was in flight.
+					this._refreshContextBlockSelection(selection);
+					const summariesById = new Map(summaries.map((result) => [result.block.entryIds[0]!, result]));
+					selection.eligible = selection.eligible.filter((block) => {
+						const generated = summariesById.get(block.entryIds[0]!);
+						if (generated?.sourceSnapshot === snapshotContextBlock(block)) return true;
+						selection.staleBlocks.push(block);
+						return false;
+					});
+					for (const block of selection.eligible) {
+						this.setBlockSummary(block.entryIds, summariesById.get(block.entryIds[0]!)!.summary);
 					}
 				} catch (cause) {
 					const message = cause instanceof Error ? cause.message : String(cause);
 					throw new Error(`Block summarization failed; no blocks were changed: ${message}`);
 				}
 
-				this._contextStatusLastPercent = null;
-				this._contextStatusForceNext = true;
-				const lines = [`Summarized ${matched.length} block(s).`];
-				for (const block of matched) lines.push(`  - ${previewBlock(block).line}`);
-				if (unknown.length > 0) lines.push(`Unknown id(s): ${unknown.join(", ")}.`);
-				return { content: [{ type: "text", text: lines.join("\n") }], details: {} };
+				if (selection.eligible.length > 0) {
+					this._contextStatusLastPercent = null;
+					this._contextStatusForceNext = true;
+				}
+				return {
+					content: [{ type: "text", text: this._formatContextCurationResult("summarized", selection) }],
+					details: {},
+				};
 			},
 		};
 	}

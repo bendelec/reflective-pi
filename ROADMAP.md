@@ -30,6 +30,11 @@ The next implementation target is described below.
   work-package boundaries, not only under capacity pressure.
 - **Block summaries** are implemented. `summarize_context` can use the active
   model or an optional `reflectiveContext.summarizationModel`.
+- **Recent-action protection** prevents agent tools from pruning or summarizing
+  the shorter trailing span of 8 visible blocks or approximately 8192 tokens,
+  rounded to whole atomic blocks. Listings retain IDs and mark protected blocks;
+  mutations process eligible IDs and report protected skips without a tool error.
+  Human `/prune` remains an override.
 - **Post-prune accounting feedback** was tested and then removed: re-reading
   replaceable files is not itself a curation failure.
 
@@ -82,10 +87,6 @@ an earlier phase changes the evidence.
 
 ### Other deferred product work
 
-- Add a `prune_context` safety guard: refuse to prune the last 8 messages or the
-  last 8192 tokens, whichever is the shorter trailing span. Preserve atomic
-  tool-call/result blocks when enforcing the protected boundary. This is planned,
-  not implemented; it protects recent grounding from over-aggressive pruning.
 - Attribute usable per-block capacity more reliably in `list_context` and
   `/prune`; server-reported context use cannot simply be divided among blocks.
 - Let users request summaries from `/prune`, not only inspect and restore them.

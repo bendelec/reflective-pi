@@ -82,7 +82,26 @@ the TUI, and sent to the model in the next request. They use the accent style be
 
 `list_context` accepts no parameters and changes nothing. It returns the current
 atomic blocks, a short preview of each, and the ID to use with the mutating tools.
-It ends with an explicit reminder that listing is read-only.
+It ends with an explicit reminder that listing is read-only. Protected recent
+blocks remain visible with their real IDs and `[protected: recent]`; select IDs
+without that marker for automatic curation.
+
+### Preserve recent actions and results
+
+The agent tools protect the shorter trailing span of **8 visible atomic blocks**
+or **approximately 8192 tokens**, rounded to whole blocks. A tool exchange that
+crosses the token boundary is protected in full, including a newest block larger
+than the token target. This protects recent assistant work and tool results from
+an over-aggressive cleanup; it is not a permanent pin for user instructions.
+
+A request containing protected IDs still processes any eligible IDs and reports
+which recent blocks it kept. If all matches are protected, the tool returns a
+normal explanation—not an error—and encourages a fresh `list_context` selection
+of older unprotected blocks. If none are eligible, it says so explicitly. The
+protection itself does not require compaction. Eligibility is checked against the
+current branch at execution, not frozen when the listing was produced.
+
+Human-operated `/prune` remains an override of this automatic safety guard.
 
 ### Exclude blocks that are no longer useful
 
@@ -92,13 +111,13 @@ It ends with an explicit reminder that listing is read-only.
 { "ids": ["id1", "id2"] }
 ```
 
-It excludes each matching block from the next model context. A tool exchange—an
+It excludes each eligible matching block from the next model context. A tool exchange—an
 assistant tool-call message and its immediately following results—is always one
 block, so a tool call cannot be left without its result or vice versa.
 
 A bare call, an empty array, or a selection with no matching ID fails with an error
 that directs the model to `list_context`. If some IDs match and some do not, rxpi
-excludes the matching blocks and reports the unknown IDs. The interface deliberately
+excludes eligible matching blocks and reports unknown and protected IDs. The interface deliberately
 keeps one verb per tool: a failed mutation cannot look like a successful list or
 prune operation.
 
@@ -108,9 +127,16 @@ later model requests.
 ### Summarize blocks whose result still matters
 
 `summarize_context` also accepts a non-empty ID array. It sends every selected
-atomic block independently to a summary model, then replaces the original block
+eligible atomic block independently to a summary model, then replaces the original block
 at its original chronological position with the resulting summary. If any summary
-request fails, no selected block is changed.
+request fails, no selected block is changed. Protected IDs are skipped before
+summary requests. If every match is protected, no summary-model/auth lookup occurs.
+Protection is checked again before persisting summaries so a block newly protected
+while a request was in flight keeps its original content. If a human/SDK edit
+changes the source during the request, the stale generated summary is discarded.
+Token estimates and summaries use the current projected content. Previously
+summarized blocks retain their existing non-selectable behavior, but their visible
+replacements still count toward the protected suffix.
 
 For a tool-call block, the summary replaces the assistant tool-call entry and the
 following result entries are omitted, preserving an atomic summarized state. The

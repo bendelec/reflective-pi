@@ -16,7 +16,7 @@ const MAX_BLOCK_SUMMARY_RATIO = 0.5;
 const MIN_BLOCK_SUMMARY_TOKENS = 128;
 
 function getBlockMessages(block: PruneBlock): AgentMessage[] {
-	return block.entries.flatMap(sessionEntryToContextMessages);
+	return block.messages ?? block.entries.flatMap(sessionEntryToContextMessages);
 }
 
 export interface BlockSummarizationRequest {

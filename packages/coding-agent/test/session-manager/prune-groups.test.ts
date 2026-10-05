@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { JsonObject } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import { groupPruneBlocks, previewBlock } from "../../src/core/prune.ts";
+import { getProtectedRecentBlockIds, groupPruneBlocks, previewBlock } from "../../src/core/prune.ts";
 import type { SessionEntry, SessionMessageEntry } from "../../src/core/session-manager.ts";
 
 function entry(id: string, parentId: string | null, message: AgentMessage): SessionMessageEntry {
@@ -167,6 +167,77 @@ describe("groupPruneBlocks", () => {
 		];
 
 		expect(groupPruneBlocks(entries).map((b) => b.entryIds)).toEqual([["1"], ["5"]]);
+	});
+});
+
+describe("getProtectedRecentBlockIds", () => {
+	it("returns no IDs for an empty list and protects all fewer than eight blocks", () => {
+		expect(getProtectedRecentBlockIds([])).toEqual(new Set());
+		const blocks = groupPruneBlocks([user("1", null, "one"), user("2", "1", "two")]);
+		expect(getProtectedRecentBlockIds(blocks)).toEqual(new Set(["1", "2"]));
+	});
+
+	it("protects the last eight small blocks", () => {
+		const entries = Array.from({ length: 10 }, (_, index) =>
+			user(String(index + 1), index === 0 ? null : String(index), "x"),
+		);
+		expect(getProtectedRecentBlockIds(groupPruneBlocks(entries))).toEqual(
+			new Set(["3", "4", "5", "6", "7", "8", "9", "10"]),
+		);
+	});
+
+	it("includes the block that reaches the exact token threshold", () => {
+		const entries = [user("1", null, "older"), user("2", "1", "x".repeat(32768))];
+		expect(getProtectedRecentBlockIds(groupPruneBlocks(entries))).toEqual(new Set(["2"]));
+	});
+
+	it("uses the token bound when it protects fewer than eight blocks", () => {
+		const entries = [user("1", null, "older"), user("2", "1", "x".repeat(32768)), user("3", "2", "new")];
+		expect(getProtectedRecentBlockIds(groupPruneBlocks(entries))).toEqual(new Set(["2", "3"]));
+	});
+
+	it("keeps a huge newest tool exchange whole", () => {
+		const entries = [
+			user("1", null, "older"),
+			assistantTools("2", "1", ["read", "read"]),
+			toolResult("3", "2", "tool-2-0"),
+			entry("4", "2", {
+				role: "toolResult",
+				toolCallId: "tool-2-1",
+				toolName: "read",
+				content: [{ type: "text", text: "x".repeat(32768) }],
+				isError: false,
+				timestamp: 1,
+			}),
+		];
+		const blocks = groupPruneBlocks(entries);
+		expect(blocks.map((block) => block.entryIds)).toEqual([["1"], ["2", "3", "4"]]);
+		expect(getProtectedRecentBlockIds(blocks)).toEqual(new Set(["2"]));
+	});
+
+	it("counts projected compaction summaries and custom messages", () => {
+		const entries: SessionEntry[] = [
+			user("older", null, "older"),
+			{
+				type: "custom_message",
+				id: "custom",
+				parentId: "older",
+				timestamp: "2025-01-01T00:00:00Z",
+				customType: "note",
+				display: true,
+				content: "x".repeat(16384),
+			},
+			{
+				type: "compaction",
+				id: "compaction",
+				parentId: "custom",
+				timestamp: "2025-01-01T00:00:00Z",
+				summary: "x".repeat(16384),
+				firstKeptEntryId: "custom",
+				tokensBefore: 10,
+			},
+		];
+		expect(getProtectedRecentBlockIds(groupPruneBlocks(entries))).toEqual(new Set(["custom", "compaction"]));
 	});
 });
 
