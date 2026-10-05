@@ -483,6 +483,7 @@ export abstract class TuiBase extends Container implements TUI {
 	private pendingOsc11BackgroundQueries: PendingOsc11BackgroundQuery[] = [];
 	private terminalColorSchemeListeners = new Set<(scheme: TerminalColorScheme) => void>();
 	private terminalColorSchemeNotificationsEnabled = false;
+	private linePreprocessCache = new Map<string, string>();
 	/** Directory for debug/crash logs. When undefined, debug logging is disabled and crash dumps fall back to the OS temp directory. */
 	protected readonly logDirectory: string | undefined;
 
@@ -507,7 +508,13 @@ export abstract class TuiBase extends Container implements TUI {
 
 	protected abstract doRender(): void;
 
-	protected resetRenderState(): void {}
+	protected resetRenderState(): void {
+		this.clearLinePreprocessCache();
+	}
+
+	protected clearLinePreprocessCache(): void {
+		this.linePreprocessCache.clear();
+	}
 
 	protected beforeTerminalStart(): void {}
 
@@ -871,6 +878,7 @@ export abstract class TuiBase extends Container implements TUI {
 	}
 
 	override invalidate(): void {
+		this.clearLinePreprocessCache();
 		for (const root of this.getMountedRoots()) root.invalidate();
 		for (const overlay of this.overlayStack) overlay.component.invalidate();
 	}
@@ -931,6 +939,7 @@ export abstract class TuiBase extends Container implements TUI {
 
 	stop(options: TuiStopOptions = {}): void {
 		this.stopped = true;
+		this.clearLinePreprocessCache();
 		this.cancelRenderTimer();
 		if (this.terminalColorSchemeNotificationsEnabled) {
 			this.terminal.write("\x1b[?2031l");
@@ -1350,14 +1359,25 @@ export abstract class TuiBase extends Container implements TUI {
 		return result;
 	}
 
+	protected preprocessLine(line: string): string {
+		return normalizeTerminalOutput(line) + SEGMENT_RESET;
+	}
+
 	protected applyLineResets(lines: string[]): string[] {
-		const reset = SEGMENT_RESET;
+		const previousFrame = this.linePreprocessCache;
+		const currentFrame = new Map<string, string>();
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];
-			if (!isImageLine(line)) {
-				lines[i] = normalizeTerminalOutput(line) + reset;
+			if (isImageLine(line)) continue;
+
+			let processed = currentFrame.get(line);
+			if (processed === undefined) {
+				processed = previousFrame.get(line) ?? this.preprocessLine(line);
+				currentFrame.set(line, processed);
 			}
+			lines[i] = processed;
 		}
+		this.linePreprocessCache = currentFrame;
 		return lines;
 	}
 

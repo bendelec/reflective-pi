@@ -8,6 +8,15 @@ const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 
+interface CachedMarkdown {
+	text: string;
+	component: Markdown;
+	streaming: boolean;
+	outputPad: number;
+	markdownTheme: MarkdownTheme;
+	transformers: readonly MarkdownTransformer[];
+}
+
 /**
  * Component that renders a complete assistant message
  */
@@ -22,6 +31,7 @@ export class AssistantMessageComponent extends Container {
 	private hasToolCalls = false;
 	private isStreaming = false;
 	private thinkingVisibilityOverrides = new Map<number, boolean>();
+	private contentCache = new Map<string, CachedMarkdown>();
 
 	constructor(
 		message?: AssistantMessage,
@@ -49,6 +59,8 @@ export class AssistantMessageComponent extends Container {
 	}
 
 	override invalidate(): void {
+		// Hidden thinking components are cached but not mounted, so Container cannot invalidate them.
+		this.contentCache.clear();
 		super.invalidate();
 		if (this.lastMessage) {
 			this.updateContent(this.lastMessage);
@@ -92,7 +104,8 @@ export class AssistantMessageComponent extends Container {
 		this.lastMessage = message;
 		this.isStreaming = isStreaming;
 
-		// Clear content container
+		const previousContentCache = this.contentCache;
+		const nextContentCache = new Map<string, CachedMarkdown>();
 		this.contentContainer.clear();
 
 		const hasVisibleContent = message.content.some(
@@ -110,12 +123,12 @@ export class AssistantMessageComponent extends Container {
 			if (content.type === "text" && content.text.trim()) {
 				// Assistant text messages with no background - trim the text
 				// Set paddingY=0 to avoid extra spacing before tool executions
-				this.contentContainer.addChild(
-					new Markdown(content.text.trim(), this.outputPad, 0, this.markdownTheme, undefined, {
-						transform: createMarkdownTransform("assistant", this.isStreaming, this.markdownTransformers),
-					}),
-				);
+				const key = `text:${i}`;
+				const entry = this.getMarkdown(previousContentCache.get(key), content.text.trim(), "assistant");
+				nextContentCache.set(key, entry);
+				this.contentContainer.addChild(entry.component);
 			} else if (content.type === "thinking") {
+				const thinkingStart = i;
 				const thinkingBlocks: string[] = [];
 				for (; i < message.content.length; i++) {
 					const thinkingContent = message.content[i];
@@ -141,25 +154,16 @@ export class AssistantMessageComponent extends Container {
 
 				const runIndex = thinkingRunIndex++;
 				const hidden = this.thinkingVisibilityOverrides.get(runIndex) ?? this.hideThinkingBlock;
+				const key = `thinking:${thinkingStart}`;
+				const entry = this.getMarkdown(
+					previousContentCache.get(key),
+					thinkingBlocks.join("\n\n"),
+					"assistant-thinking",
+				);
+				nextContentCache.set(key, entry);
 				const thinkingComponent = hidden
 					? new Text(theme.italic(theme.fg("thinkingText", this.hiddenThinkingLabel)), this.outputPad, 0)
-					: new Markdown(
-							thinkingBlocks.join("\n\n"),
-							this.outputPad,
-							0,
-							this.markdownTheme,
-							{
-								color: (text: string) => theme.fg("thinkingText", text),
-								italic: true,
-							},
-							{
-								transform: createMarkdownTransform(
-									"assistant-thinking",
-									this.isStreaming,
-									this.markdownTransformers,
-								),
-							},
-						);
+					: entry.component;
 				this.contentContainer.addChild(
 					new MouseRegion(thinkingComponent, (event) => {
 						if (event.type !== "click" || event.button !== "left") return undefined;
@@ -198,5 +202,39 @@ export class AssistantMessageComponent extends Container {
 				this.contentContainer.addChild(new Text(theme.fg("error", `Error: ${errorMsg}`), this.outputPad, 0));
 			}
 		}
+
+		this.contentCache = nextContentCache;
+	}
+
+	private getMarkdown(
+		cached: CachedMarkdown | undefined,
+		text: string,
+		messageType: "assistant" | "assistant-thinking",
+	): CachedMarkdown {
+		if (
+			cached &&
+			cached.streaming === this.isStreaming &&
+			cached.outputPad === this.outputPad &&
+			cached.markdownTheme === this.markdownTheme &&
+			cached.transformers === this.markdownTransformers
+		) {
+			if (cached.text !== text) cached.component.setText(text);
+			return { ...cached, text };
+		}
+
+		const defaultTextStyle =
+			messageType === "assistant-thinking"
+				? { color: (value: string) => theme.fg("thinkingText", value), italic: true }
+				: undefined;
+		return {
+			text,
+			component: new Markdown(text, this.outputPad, 0, this.markdownTheme, defaultTextStyle, {
+				transform: createMarkdownTransform(messageType, this.isStreaming, this.markdownTransformers),
+			}),
+			streaming: this.isStreaming,
+			outputPad: this.outputPad,
+			markdownTheme: this.markdownTheme,
+			transformers: this.markdownTransformers,
+		};
 	}
 }

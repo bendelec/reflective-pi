@@ -156,6 +156,7 @@ export class TuiMainScreen extends TuiBase implements TUI {
 	}
 
 	protected override resetRenderState(): void {
+		super.resetRenderState();
 		this.previousLines = [];
 		this.previousWidth = -1;
 		this.previousHeight = -1;

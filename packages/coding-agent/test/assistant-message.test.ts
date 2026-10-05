@@ -1,5 +1,5 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { TuiMouseEvent } from "@earendil-works/pi-tui";
+import { Container, Markdown, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { describe, expect, test } from "vitest";
 import { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.ts";
 import { UserMessageComponent } from "../src/modes/interactive/components/user-message.ts";
@@ -188,6 +188,121 @@ describe("AssistantMessageComponent", () => {
 		component.updateContent(message, false);
 		expect(stripAnsi(component.render(80).join("\n"))).toContain("partial transformed");
 		expect(streamingStates).toEqual([true, false]);
+	});
+
+	test("reuses completed Markdown while the final streamed text grows", () => {
+		initTheme("dark");
+		const calls: string[] = [];
+		const component = new AssistantMessageComponent(undefined, false, undefined, "Thinking...", 1, [
+			(markdown, context) => {
+				calls.push(`${context.messageType}:${markdown}`);
+				return markdown;
+			},
+		]);
+		const getMarkdowns = (): Markdown[] => {
+			const container = component.children[0];
+			return container instanceof Container
+				? container.children.filter((child): child is Markdown => child instanceof Markdown)
+				: [];
+		};
+
+		component.updateContent(
+			createAssistantMessage([
+				{ type: "text", text: "completed block" },
+				{ type: "text", text: "partial" },
+			]),
+			true,
+		);
+		const [completed, partial] = getMarkdowns();
+		component.render(80);
+		calls.length = 0;
+
+		component.updateContent(
+			createAssistantMessage([
+				{ type: "text", text: "completed block" },
+				{ type: "text", text: "partial grows" },
+			]),
+			true,
+		);
+		const [reusedCompleted, updatedPartial] = getMarkdowns();
+		expect(reusedCompleted).toBe(completed);
+		expect(updatedPartial).toBe(partial);
+		component.render(80);
+		expect(calls).toEqual(["assistant:partial grows"]);
+
+		calls.length = 0;
+		component.updateContent(
+			createAssistantMessage([
+				{ type: "text", text: "completed block" },
+				{ type: "text", text: "partial grows" },
+			]),
+			true,
+		);
+		component.render(80);
+		expect(getMarkdowns()[0]).toBe(completed);
+		expect(calls).toEqual([]);
+	});
+
+	test("refreshes transforms across streaming transitions and invalidation", () => {
+		initTheme("dark");
+		const states: boolean[] = [];
+		const message = createAssistantMessage([{ type: "text", text: "answer" }]);
+		const component = new AssistantMessageComponent(undefined, false, undefined, "Thinking...", 1, [
+			(markdown, context) => {
+				states.push(context.isStreaming);
+				return context.isStreaming ? markdown : `${markdown} complete`;
+			},
+		]);
+		component.updateContent(message, true);
+		expect(stripAnsi(component.render(80).join("\n"))).toContain("answer");
+		component.updateContent(message, false);
+		expect(stripAnsi(component.render(80).join("\n"))).toContain("answer complete");
+		component.setOutputPad(0);
+		expect(stripAnsi(component.render(80).join("\n"))).toContain("answer complete");
+		component.invalidate();
+		component.render(80);
+		expect(states).toEqual([true, false, false, false]);
+	});
+
+	test("preserves text components when thinking visibility changes", () => {
+		initTheme("dark");
+		const component = new AssistantMessageComponent(
+			createAssistantMessage([
+				{ type: "thinking", thinking: "reasoning" },
+				{ type: "text", text: "answer" },
+			]),
+		);
+		const container = component.children[0];
+		if (!(container instanceof Container)) throw new Error("Expected content container");
+		const getAnswer = (): Markdown | undefined =>
+			container.children.find((child): child is Markdown => child instanceof Markdown);
+		const answer = getAnswer();
+
+		component.setHideThinkingBlock(true);
+		expect(stripAnsi(component.render(80).join("\n"))).toContain("Thinking...");
+		component.setHideThinkingBlock(false);
+		expect(getAnswer()).toBe(answer);
+		expect(stripAnsi(component.render(80).join("\n"))).toContain("reasoning");
+	});
+
+	test("invalidates cached thinking Markdown even while it is hidden", () => {
+		initTheme("dark");
+		let prefix = "old";
+		const component = new AssistantMessageComponent(
+			createAssistantMessage([{ type: "thinking", thinking: "reasoning" }]),
+			false,
+			undefined,
+			"Thinking...",
+			1,
+			[(markdown) => `${prefix}:${markdown}`],
+		);
+		expect(stripAnsi(component.render(80).join("\n"))).toContain("old:reasoning");
+		component.setHideThinkingBlock(true);
+		component.render(80);
+		prefix = "new";
+		component.invalidate();
+		component.setHideThinkingBlock(false);
+		expect(stripAnsi(component.render(80).join("\n"))).toContain("new:reasoning");
 	});
 
 	test("reapplies Markdown transformers when available width changes", () => {

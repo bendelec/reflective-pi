@@ -36,7 +36,7 @@ For platform-specific help, see [Terminal Setup](terminal-setup.md), [Windows](w
 
 For context curation, see [Reflective context management](reflective-context.md) - model-led curation and `/prune` - and [Reflective-context PoC status](reflective-context-poc.md) - implementation decisions, phase-one evidence, and the next experiment.
 
-For maintainers: [Upstream base update](upstream-base-update.md) - decision record for merging the fork's base forward.
+For maintainers: [Upstream base update](upstream-base-update.md) - decision record for merging the fork's base forward - and [Streaming render CPU investigation](render-performance.md) - measurements, cache design, and reproduction.
 
 ## Work safely
 

@@ -1,4 +1,4 @@
-import { Marked, type Token, Tokenizer, type TokenizerExtension, type Tokens } from "marked";
+import { Marked, type Token, Tokenizer, type TokenizerExtension, type Tokens, type TokensList } from "marked";
 import { renderLatex } from "../latex.ts";
 import { getCapabilities, hyperlink, isImageLine } from "../terminal-image.ts";
 import type { Component } from "../tui.ts";
@@ -247,7 +247,13 @@ export class Markdown implements Component {
 	private cachedWidth?: number;
 	private cachedLines?: string[];
 	// Parsed tokens depend only on the source, so they survive theme and width invalidation.
-	private cachedTokens?: { source: string; tokens: Token[] };
+	private cachedTokens?: {
+		source: string;
+		tokens: TokensList;
+		stableTokenCount: number;
+		stableSourceLength: number;
+	};
+	private renderedBlocks = new WeakMap<Token, { width: number; nextTokenType?: string; lines: string[] }>();
 
 	constructor(
 		text: string,
@@ -266,14 +272,23 @@ export class Markdown implements Component {
 	}
 
 	setText(text: string): void {
+		if (text === this.text) {
+			this.invalidate();
+			return;
+		}
 		this.text = text;
-		this.invalidate();
+		// Source updates can retain completed blocks; explicit invalidation also refreshes their styling.
+		this.cachedText = undefined;
+		this.cachedWidth = undefined;
+		this.cachedLines = undefined;
 	}
 
 	invalidate(): void {
 		this.cachedText = undefined;
 		this.cachedWidth = undefined;
 		this.cachedLines = undefined;
+		this.defaultStylePrefix = undefined;
+		this.renderedBlocks = new WeakMap();
 	}
 
 	render(width: number): string[] {
@@ -288,6 +303,8 @@ export class Markdown implements Component {
 
 		// Don't render anything if there's no actual text
 		if (!text || text.trim() === "") {
+			this.cachedTokens = undefined;
+			this.renderedBlocks = new WeakMap();
 			const result: string[] = [];
 			// Update cache
 			this.cachedText = this.text;
@@ -296,63 +313,110 @@ export class Markdown implements Component {
 			return result;
 		}
 
-		// Replace tabs with 3 spaces for consistent rendering
-		const normalizedText = text.replace(/\t/g, "   ");
-
-		// Parse markdown to HTML-like tokens
-		let tokens = this.cachedTokens?.source === normalizedText ? this.cachedTokens.tokens : undefined;
+		// Match Marked's newline normalization so token raw lengths are source offsets.
+		const normalizedText = text.replace(/\t/g, "   ").replace(/\r\n|\r/g, "\n");
+		const cached = this.cachedTokens;
+		let tokens = cached?.source === normalizedText ? cached.tokens : undefined;
 		if (!tokens) {
-			tokens = markdownParser.lexer(normalizedText);
-			trimPartialClosingFences(tokens);
-			this.cachedTokens = { source: normalizedText, tokens };
-		}
-
-		// Convert tokens to styled terminal output
-		const renderedLines: string[] = [];
-
-		for (let i = 0; i < tokens.length; i++) {
-			const token = tokens[i];
-			const nextToken = tokens[i + 1];
-			const tokenLines = this.renderToken(token, contentWidth, nextToken?.type);
-			for (const tokenLine of tokenLines) {
-				renderedLines.push(tokenLine);
-			}
-		}
-
-		// Wrap lines (NO padding, NO background yet)
-		const wrappedLines: string[] = [];
-		for (const line of renderedLines) {
-			if (isImageLine(line)) {
-				wrappedLines.push(line);
-			} else {
-				for (const wrappedLine of wrapTextWithAnsi(line, contentWidth)) {
-					wrappedLines.push(wrappedLine);
+			if (cached && cached.stableTokenCount > 0 && normalizedText.startsWith(cached.source)) {
+				const tail = markdownParser.lexer(normalizedText.slice(cached.stableSourceLength));
+				// A new definition can resolve references anywhere in the earlier document.
+				if (Object.keys(tail.links).length === 0) {
+					tokens = Object.assign([...cached.tokens.slice(0, cached.stableTokenCount), ...tail], {
+						links: tail.links,
+					});
 				}
 			}
+			tokens ??= markdownParser.lexer(normalizedText);
+			trimPartialClosingFences(tokens);
+
+			// Reparse the last block and its predecessor: appended input can extend lists,
+			// turn a paragraph into a heading/table, or change trailing blank-line handling.
+			let stableTokenCount = Math.max(0, tokens.length - 2);
+			let stableSourceLength = 0;
+			let sourceLength = 0;
+			for (let i = 0; i < tokens.length; i++) {
+				if (!normalizedText.startsWith(tokens[i].raw, sourceLength)) {
+					stableTokenCount = 0;
+					break;
+				}
+				const token = tokens[i];
+				if (
+					i < stableTokenCount &&
+					((token.type !== "code" && /(?:^|\n) {0,3}\[(?:\\[\s\S]|[^[\]\\])*\\?$/.test(token.raw)) ||
+						((token.type === "paragraph" || token.type === "text") && /(?:^|\n) {0,3}\$\$/.test(token.raw)))
+				) {
+					// Unclosed labels and unrecognized dollar blocks can absorb any number of
+					// following paragraphs once their closing syntax arrives.
+					stableTokenCount = i;
+					stableSourceLength = sourceLength;
+				}
+				sourceLength += token.raw.length;
+				if (i + 1 === stableTokenCount) stableSourceLength = sourceLength;
+			}
+			let hasHtml = false;
+			const tokenGroups: Token[][] = [tokens];
+			for (let i = 0; i < tokenGroups.length && !hasHtml; i++) {
+				for (const token of tokenGroups[i]) {
+					if (token.type === "html") {
+						hasHtml = true;
+						break;
+					}
+					if (token.type === "list") {
+						for (const item of (token as Tokens.List).items) tokenGroups.push(item.tokens);
+					} else if (token.type === "table") {
+						const table = token as Tokens.Table;
+						for (const cell of table.header) tokenGroups.push(cell.tokens);
+						for (const row of table.rows) {
+							for (const cell of row) tokenGroups.push(cell.tokens);
+						}
+					} else if ("tokens" in token && token.tokens) {
+						tokenGroups.push(token.tokens);
+					}
+				}
+			}
+			// Definitions are document-wide; inline HTML can carry lexer state across blocks.
+			// Sources not exactly covered by token raw strings cannot be safely split either.
+			if (sourceLength !== normalizedText.length || Object.keys(tokens.links).length > 0 || hasHtml) {
+				stableTokenCount = 0;
+			}
+			this.cachedTokens = { source: normalizedText, tokens, stableTokenCount, stableSourceLength };
 		}
 
-		// Add margins and background to each wrapped line
 		const leftMargin = " ".repeat(this.paddingX);
 		const rightMargin = " ".repeat(this.paddingX);
 		const bgFn = this.defaultTextStyle?.bgColor;
 		const contentLines: string[] = [];
-
-		for (const line of wrappedLines) {
-			if (isImageLine(line)) {
-				contentLines.push(line);
+		for (let i = 0; i < tokens.length; i++) {
+			const token = tokens[i];
+			const nextTokenType = tokens[i + 1]?.type;
+			const block = this.renderedBlocks.get(token);
+			if (block?.width === width && block.nextTokenType === nextTokenType) {
+				for (const line of block.lines) contentLines.push(line);
 				continue;
 			}
 
-			const lineWithMargins = leftMargin + line + rightMargin;
-
-			if (bgFn) {
-				contentLines.push(applyBackgroundToLine(lineWithMargins, width, bgFn));
-			} else {
-				// No background - just pad to width
-				const visibleLen = visibleWidth(lineWithMargins);
-				const paddingNeeded = Math.max(0, width - visibleLen);
-				contentLines.push(lineWithMargins + " ".repeat(paddingNeeded));
+			const lines: string[] = [];
+			for (const line of this.renderToken(token, contentWidth, nextTokenType)) {
+				if (isImageLine(line)) {
+					lines.push(line);
+					continue;
+				}
+				for (const wrappedLine of wrapTextWithAnsi(line, contentWidth)) {
+					if (isImageLine(wrappedLine)) {
+						lines.push(wrappedLine);
+						continue;
+					}
+					const lineWithMargins = leftMargin + wrappedLine + rightMargin;
+					lines.push(
+						bgFn
+							? applyBackgroundToLine(lineWithMargins, width, bgFn)
+							: lineWithMargins + " ".repeat(Math.max(0, width - visibleWidth(lineWithMargins))),
+					);
+				}
 			}
+			this.renderedBlocks.set(token, { width, nextTokenType, lines });
+			for (const line of lines) contentLines.push(line);
 		}
 
 		// Add top/bottom padding (empty lines)

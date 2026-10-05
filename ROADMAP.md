@@ -82,6 +82,10 @@ an earlier phase changes the evidence.
 
 ### Other deferred product work
 
+- Add a `prune_context` safety guard: refuse to prune the last 8 messages or the
+  last 8192 tokens, whichever is the shorter trailing span. Preserve atomic
+  tool-call/result blocks when enforcing the protected boundary. This is planned,
+  not implemented; it protects recent grounding from over-aggressive pruning.
 - Attribute usable per-block capacity more reliably in `list_context` and
   `/prune`; server-reported context use cannot simply be divided among blocks.
 - Let users request summaries from `/prune`, not only inspect and restore them.
