@@ -564,15 +564,15 @@ function projectContextEntry(entry: SessionEntry, change: ResolvedContextChange 
 	if (change.type === "prune") {
 		if (change.state === "included") return messages;
 		if (change.state === "excluded" || !change.summary) return [];
-		return [
-			createCustomMessage(
-				"context_summary",
-				CONTEXT_BLOCK_SUMMARY_PREFIX + change.summary,
-				false,
-				undefined,
-				entry.timestamp,
-			),
-		];
+		const summary = createCustomMessage(
+			"context_summary",
+			CONTEXT_BLOCK_SUMMARY_PREFIX + change.summary,
+			false,
+			undefined,
+			entry.timestamp,
+		);
+		// Legacy summaries replace the conversation summary, not the saved prompt/tool state.
+		return entry.type === "compaction" && entry.systemMessage ? [entry.systemMessage, summary] : [summary];
 	}
 	const replacement = change.replacement;
 	if (replacement === null) return [];

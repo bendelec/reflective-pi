@@ -456,6 +456,71 @@ describe("curation extraction and persistence", () => {
 		expect(imported.getEntry("dangling")).toMatchObject({ targetId: "not-retained" });
 	});
 
+	it("restores a summarized tool exchange retained across two compaction checkpoints", () => {
+		const directory = mkdtempSync(join(tmpdir(), "context-curation-compaction-retention-"));
+		directories.push(directory);
+		const session = SessionManager.create(directory, directory);
+		const discarded = session.appendMessage({ role: "user", content: "OUTSIDE_RETENTION", timestamp: 1 });
+		const assistant = fauxAssistantMessage([fauxToolCall("read", {}), fauxToolCall("bash", {})], {
+			stopReason: "toolUse",
+		});
+		const head = session.appendMessage(assistant);
+		const callIds = assistant.content.flatMap((part) => (part.type === "toolCall" ? [part.id] : []));
+		const results = callIds.map((toolCallId, index) =>
+			session.appendMessage({
+				role: "toolResult",
+				toolCallId,
+				toolName: index === 0 ? "read" : "bash",
+				content: [{ type: "text", text: `RAW_TOOL_RESULT_${index}` }],
+				isError: false,
+				timestamp: index + 2,
+			}),
+		);
+		const exchangeIds = [head, ...results];
+		session.appendContextChanges(
+			exchangeIds.map((targetId, index) => ({
+				targetId,
+				state: "summarized" as const,
+				...(index === 0 ? { summary: "TOOL_EXCHANGE_SUMMARY" } : {}),
+			})),
+		);
+
+		session.appendCompaction("FIRST_CHECKPOINT", head, 1000);
+		expect(session.buildContextEntriesAll().map((entry) => entry.id)).toEqual(expect.arrayContaining(exchangeIds));
+		session.appendMessage({ role: "user", content: "between checkpoints", timestamp: 4 });
+		session.appendCompaction("SECOND_CHECKPOINT", head, 1200);
+		expect(session.buildContextEntriesAll().map((entry) => entry.id)).toEqual(expect.arrayContaining(exchangeIds));
+		expect(projectedText(session)).toContain("SECOND_CHECKPOINT");
+		expect(projectedText(session)).toContain(`${CONTEXT_BLOCK_SUMMARY_PREFIX}TOOL_EXCHANGE_SUMMARY`);
+		expect(projectedText(session)).not.toContain("RAW_TOOL_RESULT_0");
+		expect(projectedText(session)).not.toContain("RAW_TOOL_RESULT_1");
+
+		for (const id of exchangeIds) session.appendContextChange(id, "included");
+		session.appendContextChange(discarded, "included");
+		const file = session.getSessionFile();
+		if (!file) throw new Error("expected persisted session file");
+		expect(readFileSync(file, "utf8")).toContain('"type":"context_edit_cancel"');
+
+		const reloaded = SessionManager.open(file);
+		const projection = reloaded.buildSessionProjection();
+		const restoredAssistant = projection.messages.find(
+			(message) => message.role === "assistant" && message.content.some((part) => part.type === "toolCall"),
+		);
+		if (!restoredAssistant || restoredAssistant.role !== "assistant") {
+			throw new Error("expected restored assistant tool-call head in projection");
+		}
+		const projectedCalls = restoredAssistant.content.filter((part) => part.type === "toolCall");
+		const projectedResults = projection.messages.filter((message) => message.role === "toolResult");
+		expect(projectedCalls.map((call) => call.id)).toEqual(callIds);
+		expect(projectedResults.map((result) => result.toolCallId)).toEqual(callIds);
+		expect(projectedResults.map((result) => contentText(result.content))).toEqual([
+			"RAW_TOOL_RESULT_0",
+			"RAW_TOOL_RESULT_1",
+		]);
+		expect(projectedText(reloaded)).not.toContain("OUTSIDE_RETENTION");
+		expect(reloaded.getPruneState(discarded)).toBeUndefined();
+	});
+
 	it("reloads edits and cancellations, copies the full tree on fork, and persists path extraction", () => {
 		const directory = mkdtempSync(join(tmpdir(), "context-curation-"));
 		directories.push(directory);

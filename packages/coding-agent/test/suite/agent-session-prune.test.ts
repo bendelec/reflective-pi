@@ -2,7 +2,7 @@ import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
-import { createHarness, type Harness } from "./harness.ts";
+import { createHarness, getMessageText, type Harness } from "./harness.ts";
 
 describe("AgentSession setPruneState", () => {
 	const harnesses: Harness[] = [];
@@ -14,6 +14,14 @@ describe("AgentSession setPruneState", () => {
 		for (const harness of harnesses) harness.cleanup();
 		harnesses.length = 0;
 	});
+
+	function createDeferred(): { promise: Promise<void>; resolve: () => void } {
+		let resolve!: () => void;
+		const promise = new Promise<void>((done) => {
+			resolve = done;
+		});
+		return { promise, resolve };
+	}
 
 	function userEntryId(harness: Harness): string {
 		const entry = harness.sessionManager.getEntries().find((e) => e.type === "message" && e.message.role === "user");
@@ -400,6 +408,99 @@ describe("AgentSession setPruneState", () => {
 		expect(harness.sessionManager.getPruneSummary(targetId)).toBeUndefined();
 		expect(harness.getPendingResponseCount()).toBe(0);
 	});
+
+	it.each(["discarded", "retained"] as const)(
+		"keeps a stale in-flight summary from replacing a %s target after compaction",
+		async (retention) => {
+			const harness = track(
+				await createHarness({
+					models: [{ id: "test-model", contextWindow: 100000 }],
+					settings: { compaction: { enabled: false, keepRecentTokens: retention === "discarded" ? 0 : 50 } },
+				}),
+			);
+			harness.setResponses([fauxAssistantMessage("Old history completed.")]);
+			await harness.session.prompt("OLD_HISTORY_BEFORE_TARGET ".repeat(500));
+			const targetText = `CURRENT_SUMMARY_TARGET_${retention}`;
+			harness.setResponses([fauxAssistantMessage("Target action completed.")]);
+			await harness.session.prompt(targetText);
+			const target = harness.sessionManager
+				.getEntries()
+				.find(
+					(entry) =>
+						entry.type === "message" &&
+						entry.message.role === "user" &&
+						getMessageText(entry.message) === targetText,
+				);
+			if (!target) throw new Error("expected summary target");
+
+			// These newer blocks initially protect themselves, leaving the target eligible.
+			// Compaction folds them into its earlier system checkpoint, shrinking the
+			// visible suffix enough to protect the retained target.
+			for (let index = 0; index < 8; index++) {
+				harness.sessionManager.appendMessage({
+					role: "system",
+					content: `Newer system patch ${index + 1}`,
+					timestamp: Date.now(),
+				});
+			}
+			harness.session.refreshContext();
+			const started = createDeferred();
+			const released = createDeferred();
+			const staleSummary = "STALE_GENERATED_BLOCK_SUMMARY";
+			harness.setResponses([
+				async (context) => {
+					started.resolve();
+					expect(JSON.stringify(context.messages)).toContain(targetText);
+					await released.promise;
+					return fauxAssistantMessage(staleSummary);
+				},
+				fauxAssistantMessage("Compacted old history without carrying target details."),
+				fauxAssistantMessage("Compacted old turn prefix."),
+			]);
+			const summarize = harness.session.agent.state.tools.find((tool) => tool.name === "summarize_context");
+			if (!summarize) throw new Error("expected summary tool");
+			// Invoke the real handler without an agent loop so manual compaction does
+			// not abort a streaming turn instead of exercising summary revalidation.
+			const generating = summarize.execute("in-flight-summary", { ids: [target.id] });
+			try {
+				await started.promise;
+				await harness.session.compact();
+				const entriesAfterCompaction = harness.sessionManager.getEntries();
+				expect(entriesAfterCompaction.some((entry) => entry.type === "compaction")).toBe(true);
+				const compactedMessages = JSON.stringify(harness.sessionManager.buildSessionContext().messages);
+				expect(compactedMessages).not.toContain("OLD_HISTORY_BEFORE_TARGET");
+				if (retention === "retained") expect(compactedMessages).toContain(targetText);
+				else expect(compactedMessages).not.toContain(targetText);
+
+				released.resolve();
+				const result = await generating;
+				const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join("");
+				expect(text).toContain("Nothing summarized");
+				expect(text).toContain(target.id);
+				if (retention === "retained") expect(text).toContain("protected recent block");
+				else expect(text).toContain("not selectable in the current context");
+				expect(harness.sessionManager.getEntries()).toEqual(entriesAfterCompaction);
+				expect(harness.sessionManager.getPruneSummary(target.id)).toBeUndefined();
+				expect(JSON.stringify(harness.sessionManager.buildSessionContext().messages)).not.toContain(staleSummary);
+
+				harness.setResponses([
+					(context) => {
+						const request = JSON.stringify(context.messages);
+						expect(request).not.toContain(staleSummary);
+						expect(request).not.toContain("OLD_HISTORY_BEFORE_TARGET");
+						if (retention === "retained") expect(request).toContain(targetText);
+						else expect(request).not.toContain(targetText);
+						return fauxAssistantMessage("Continued after compaction.");
+					},
+				]);
+				await harness.session.prompt("Continue after compaction.");
+				expect(harness.getPendingResponseCount()).toBe(0);
+			} finally {
+				released.resolve();
+				await generating;
+			}
+		},
+	);
 
 	it("does not restore a block excluded while its summary is in flight", async () => {
 		const harness = track(await createHarness({ models: [{ id: "test-model", contextWindow: 1000 }] }));
